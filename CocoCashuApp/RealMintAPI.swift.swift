@@ -60,8 +60,9 @@ struct RealMintAPI: MintAPI {
 
   func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
     // 0) Reachability check
-    _ = try await getJSON(InfoResponse.self, path: "/v1/info")
-
+      let _ : InfoResponse = try await getJSON(InfoResponse.self, path: "/v1/info")
+      print("RealMintAPI reachability ok: /v1/info")
+      
     // 1) Try GET style first: /v1/mint/quote/bolt11?amount=100&unit=sat
     do {
       let q: QuoteResponse = try await getJSON(QuoteResponse.self, path: "/v1/mint/quote/bolt11", query: ["amount": String(amount), "unit": "sat"])
@@ -70,9 +71,17 @@ struct RealMintAPI: MintAPI {
       print("RealMintAPI GET quote failed, will try POST:", error)
     }
 
-    // 2) Fallback: POST style { amount: 100 }
-    let q: QuoteResponse = try await postJSON(QuoteResponse.self, path: "/v1/mint/quote/bolt11", body: ["amount": amount])
-    return (q.invoice, q.expiresAt, q.quoteId)
+      // 2) Fallback: POST style { amount: 100, unit: "sat" }
+      do {
+        let q: QuoteResponse = try await postJSON(QuoteResponse.self,
+                                                 path: "/v1/mint/quote/bolt11",
+                                                 body: ["amount": amount, "unit": "sat"])
+        print("RealMintAPI POST quote ok")
+        return (q.invoice, q.expiresAt, q.quoteId)
+      } catch {
+        print("RealMintAPI POST quote error:", error)
+        throw error
+      }
   }
 
   func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus {
