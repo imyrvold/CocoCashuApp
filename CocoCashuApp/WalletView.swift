@@ -8,7 +8,10 @@ struct WalletView: View {
   @Bindable var wallet: ObservableWallet
     @State private var showInvoice = false
     @State private var lastInvoice: String?
-
+    @State private var showWithdraw = false
+    @State private var withdrawInvoice = ""
+    @State private var withdrawAmount = ""
+    
   private let demoMint = URL(string: "https://mint.test")!
     let activeMint = URL(string: "https://cashu.cz")! // or mint.coinos.io, etc.
 
@@ -40,6 +43,54 @@ struct WalletView: View {
       .frame(minHeight: 240)
 
       HStack {
+          Button("Withdraw (melt)…") {
+            showWithdraw = true
+          }
+          .sheet(isPresented: $showWithdraw) {
+            VStack(alignment: .leading, spacing: 12) {
+              Text("Withdraw to Lightning").font(.headline)
+              Text("Paste a BOLT11 invoice and enter an amount in sats.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+              Text("Invoice (BOLT11)")
+              TextField("lnbc1…", text: $withdrawInvoice)
+                .textFieldStyle(.roundedBorder)
+                .font(.footnote)
+                .textSelection(.enabled)
+
+              Text("Amount (sats)")
+              TextField("100", text: $withdrawAmount)
+                .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                .keyboardType(.numberPad)
+#endif
+
+              HStack {
+                Spacer()
+                Button("Cancel") { showWithdraw = false }
+                Button("Withdraw") {
+                  Task {
+                    guard let amt = Int64(withdrawAmount.trimmingCharacters(in: .whitespacesAndNewlines)), amt > 0 else { return }
+                    let dest = withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !dest.isEmpty else { return }
+                    do {
+                      try await wallet.manager.mintService.spend(amount: amt, from: activeMint, to: dest)
+                      showWithdraw = false
+                      withdrawInvoice = ""; withdrawAmount = ""
+                    } catch {
+                      // Optionally present error UI
+                      print("Withdraw error:", error)
+                    }
+                  }
+                }
+                .buttonStyle(.borderedProminent)
+              }
+            }
+            .padding()
+            .frame(minWidth: 360)
+          }
+          
         Button("Mint 100 sats") {
           Task {
             // In a real flow you’d create a quote and poll until paid,
