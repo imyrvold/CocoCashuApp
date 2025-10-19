@@ -6,8 +6,11 @@ import CocoCashuCore
 
 struct WalletView: View {
   @Bindable var wallet: ObservableWallet
+    @State private var showInvoice = false
+    @State private var lastInvoice: String?
 
   private let demoMint = URL(string: "https://mint.test")!
+    let activeMint = URL(string: "https://cashu.cz")! // or mint.coinos.io, etc.
 
   var body: some View {
     // Precompute values to help the type-checker
@@ -20,8 +23,8 @@ struct WalletView: View {
         .font(.title.bold())
 
       // Current balance for the demo mint
-      Text("Balance: \(currentBalance) sats")
-        .font(.headline)
+        Text("Balance: \(balance(for: activeMint)) sats")
+            .font(.headline)
 
       // Proofs list (grouped by mint)
       List {
@@ -55,16 +58,23 @@ struct WalletView: View {
           Button("Mint 100 sats (real)") {
               print("WalletView: Mint 100 sats (real)")
             Task {
-              let mint = demoMint
+                let mint = activeMint
               let manager = wallet.manager
-              let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)
+              let api = RealMintAPI(baseURL: mint)
               let flow = MintCoordinator(manager: manager, api: api)
-              let (invoice, _) = try await flow.topUp(mint: mint, amount: 100)
+                let (invoice, qid) = try await flow.topUp(mint: mint, amount: 100)
+                lastInvoice = invoice
+                showInvoice = true
+                
+                
                 print("WalletView invoice:", invoice)
-              // TODO: show a sheet with the BOLT11 invoice for the user to pay
-              try await flow.pollUntilPaid(mint: mint, invoice: invoice)
-              try await flow.receiveTokens(mint: mint, invoice: invoice)
+                // Wait for payment
+                try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
+                try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid)
             }
+          }
+          .sheet(isPresented: $showInvoice) {
+            InvoiceSheet(invoice: lastInvoice ?? "")
           }
           
           Button("Pay LN invoice") {

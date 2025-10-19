@@ -95,11 +95,27 @@ struct RealMintAPI: MintAPI {
     }
   }
 
-  func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
-    // Typical: POST /v1/mint { invoice }
-    let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])
-    return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
-  }
+    // Some mints require quote id instead of invoice for status
+    func checkQuoteStatus(quoteId: String) async throws -> QuoteStatus {
+      let s: StatusResponse = try await getJSON(StatusResponse.self,
+                                                path: "/v1/mint/quote/bolt11/status",
+                                                query: ["quote": quoteId])
+      return s.paid ? .paid : .pending
+    }
+
+    func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
+        // Typical: POST /v1/mint { invoice }
+        let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])
+        return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+    }
+
+    // Some mints deliver tokens by quote id instead of invoice
+    func requestTokens(quoteId: String, mint: MintURL) async throws -> [Proof] {
+      let r: MintTokenResponse = try await postJSON(MintTokenResponse.self,
+                                                    path: "/v1/mint",
+                                                    body: ["quote": quoteId])
+      return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+    }
 
   func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> String {
     // Typical: POST /v1/melt/bolt11 { invoice, proofs }
