@@ -26,18 +26,19 @@ struct ContentView: View {
 }
 
 struct DemoAPI: MintAPI {
-    func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
-    // Call your real mint endpoint here
+  func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
     ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600), nil)
   }
+
   func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus { .paid }
+
   func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
-    // After payment confirmed, mint returns blinded proofs:
-    return [Proof(amount: 1000, mint: mint, secret: Data("secret".utf8))]
+    [Proof(amount: 1000, mint: mint, secret: Data("secret".utf8))]
   }
-  func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> String {
-    // Call melt API with selected proofs
-    return String(repeating: "00", count: 32) // 32 bytes as hex (64 chars)
+
+  // ⬇️ Update this method to match the protocol
+  func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
+    return (String(repeating: "00", count: 32), nil)
   }
 }
 

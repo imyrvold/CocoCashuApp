@@ -25,9 +25,9 @@ enum CashuBootstrap {
           [Proof(amount: 100, mint: mint, secret: Data("secret".utf8))]
         }
         
-        func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> String {
-            String(repeating: "00", count: 32)
-      }
+        func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
+          return (String(repeating: "00", count: 32), nil)
+        }
     }
 
     let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)

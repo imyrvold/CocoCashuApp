@@ -54,7 +54,7 @@ struct RealMintAPI: MintAPI {
     let proofs: [MintProof]
   }
 
-  struct MeltResponse: Decodable { let paid: Bool; let preimage: String? }
+  struct MeltResponse: Decodable { let paid: Bool; let preimage: String?; let change: [MintTokenResponse.MintProof]? }
 
   // MARK: - MintAPI
 
@@ -117,7 +117,7 @@ struct RealMintAPI: MintAPI {
       return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
     }
 
-  func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> String {
+  func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
     // Typical: POST /v1/melt/bolt11 { invoice, proofs }
     let payload: [String: Any] = [
       "invoice": destination,
@@ -125,7 +125,10 @@ struct RealMintAPI: MintAPI {
     ]
     let r: MeltResponse = try await postJSON(MeltResponse.self, path: "/v1/melt/bolt11", anyBody: payload)
     guard r.paid, let pre = r.preimage else { throw CashuError.protocolError("Melt failed or unpaid") }
-    return pre
+    let changeProofs: [Proof]? = r.change?.map { mp in
+      Proof(amount: mp.amount, mint: mint, secret: Data(hexOrBase64: mp.secret) ?? Data())
+    }
+    return (preimage: pre, change: changeProofs)
   }
 
   // MARK: - Networking helpers

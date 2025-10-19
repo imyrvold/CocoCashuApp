@@ -11,6 +11,8 @@ struct WalletView: View {
     @State private var showWithdraw = false
     @State private var withdrawInvoice = ""
     @State private var withdrawAmount = ""
+    @State private var isWithdrawing = false
+    @State private var withdrawError: String? = nil
     
   private let demoMint = URL(string: "https://mint.test")!
     let activeMint = URL(string: "https://cashu.cz")! // or mint.coinos.io, etc.
@@ -58,33 +60,46 @@ struct WalletView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.footnote)
                 .textSelection(.enabled)
+                .onChange(of: withdrawInvoice) { newValue in
+                  if let sats = parseSatsFromBOLT11(newValue) {
+                    withdrawAmount = String(sats)
+                  }
+                }
 
               Text("Amount (sats)")
               TextField("100", text: $withdrawAmount)
                 .textFieldStyle(.roundedBorder)
+                .disabled(true)
 #if os(iOS)
                 .keyboardType(.numberPad)
 #endif
+
+              if isWithdrawing { ProgressView().padding(.vertical, 4) }
+              if let err = withdrawError { Text(err).foregroundStyle(.red).font(.footnote) }
 
               HStack {
                 Spacer()
                 Button("Cancel") { showWithdraw = false }
                 Button("Withdraw") {
                   Task {
-                    guard let amt = Int64(withdrawAmount.trimmingCharacters(in: .whitespacesAndNewlines)), amt > 0 else { return }
+                    withdrawError = nil
+                    guard let amt = parseSatsFromBOLT11(withdrawInvoice) else { withdrawError = "Could not parse amount from invoice"; return }
                     let dest = withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !dest.isEmpty else { return }
+                    guard !dest.isEmpty else { withdrawError = "Invoice is empty"; return }
+                    isWithdrawing = true
                     do {
                       try await wallet.manager.mintService.spend(amount: amt, from: activeMint, to: dest)
+                      isWithdrawing = false
                       showWithdraw = false
-                      withdrawInvoice = ""; withdrawAmount = ""
+                      withdrawInvoice = ""; withdrawAmount = ""; withdrawError = nil
                     } catch {
-                      // Optionally present error UI
-                      print("Withdraw error:", error)
+                      isWithdrawing = false
+                      withdrawError = String(describing: error)
                     }
                   }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
               }
             }
             .padding()
@@ -172,5 +187,36 @@ private struct ProofRow: View {
       Text(proof.state.rawValue)
         .foregroundStyle(proof.state == .unspent ? Color.secondary : Color.orange)
     }
+  }
+}
+
+
+private func parseSatsFromBOLT11(_ bolt11: String) -> Int64? {
+  // Expect prefix like lnbc[amount][multiplier]
+  // Examples: lnbc1u… => 1 microBTC = 100 sats; lnbc10u => 1000 sats; lnbc1000n => 0.1 sat (unsupported)
+  // We handle m (milli), u (micro), n (nano), p (pico). Return sats if integral.
+  guard let lnRange = bolt11.range(of: "lnbc", options: [.caseInsensitive]) else { return nil }
+  let suffix = bolt11[lnRange.upperBound...]
+  // Read numeric+unit until non-alnum
+  var digits = ""
+  var unit: Character? = nil
+  for ch in suffix {
+    if ch.isNumber { digits.append(ch) }
+    else if "munp".contains(ch) { unit = ch; break }
+    else { break }
+  }
+  guard let unitChar = unit, let amountVal = Int64(digits), amountVal > 0 else { return nil }
+  // Convert BTC unit to sats
+  switch unitChar {
+  case "m": // milliBTC => 0.001 BTC => 100_000 sats per 1
+    return amountVal * 100_000
+  case "u": // microBTC => 0.000001 BTC => 100 sats per 1
+    return amountVal * 100
+  case "n": // nanoBTC => 0.000000001 BTC => 0.1 sat per 1 (not integral)
+    return nil
+  case "p": // picoBTC => 0.000000000001 BTC => 0.0001 sat per 1 (not integral)
+    return nil
+  default:
+    return nil
   }
 }
