@@ -1,3 +1,4 @@
+
 import Foundation
 import CocoCashuCore
 
@@ -5,124 +6,146 @@ struct RealMintAPI: MintAPI {
   let baseURL: URL
   let urlSession: URLSession = .shared
 
-  // MARK: Types you can tweak to your mint’s schema
+  // MARK: - Tolerant response models
+  struct InfoResponse: Decodable { let name: String? }
+
   struct QuoteResponse: Decodable {
     let invoice: String
     let expiresAt: Date?
-    let quoteId: String?   // some mints use id, token, or quote
+    let quoteId: String?
+
     enum CodingKeys: String, CodingKey {
-      case invoice
-      case expiresAt = "expires_at"
-      case quoteId = "quote" // adjust to your mint: "quote", "id", "quote_id"
+      case invoice, expiresAt = "expires_at", quoteId
+      // Alternate keys used by some mints
+        case request, pr, quote, id, quote_id = "quote_id"
     }
+      init(from decoder: Decoder) throws {
+          let c = try decoder.container(keyedBy: CodingKeys.self)
+          // invoice candidates
+          if let inv = try c.decodeIfPresent(String.self, forKey: .invoice) {
+              invoice = inv
+          } else if let inv = try c.decodeIfPresent(String.self, forKey: .request) {
+              invoice = inv
+          } else if let inv = try c.decodeIfPresent(String.self, forKey: .pr) {
+              invoice = inv
+          } else {
+              throw DecodingError.keyNotFound(CodingKeys.invoice, .init(codingPath: decoder.codingPath, debugDescription: "No invoice field in quote response"))
+          }
+          // expires
+          expiresAt = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
+          // quote id candidates (decode stepwise and tolerate numeric ids)
+          let q1 = try? c.decodeIfPresent(String.self, forKey: .quoteId)
+          let q2 = try? c.decodeIfPresent(String.self, forKey: .quote)
+          let q3 = try? c.decodeIfPresent(String.self, forKey: .id)
+          var q4: String? = nil
+          if let s = try? c.decodeIfPresent(String.self, forKey: .quote_id) {
+              q4 = s
+          } else if let n = try? c.decodeIfPresent(Int.self, forKey: .quote_id) {
+              q4 = String(n)
+          }
+          quoteId = q1 ?? q2 ?? q3 ?? q4
+      }
   }
 
-  struct StatusResponse: Decodable {
-    let paid: Bool
-    enum CodingKeys: String, CodingKey { case paid }
-  }
+  struct StatusResponse: Decodable { let paid: Bool }
 
   struct MintTokenResponse: Decodable {
+    struct MintProof: Decodable { let amount: Int64; let secret: String }
     let proofs: [MintProof]
-    struct MintProof: Decodable {
-      let amount: Int64
-      let secret: String     // hex or base64; adjust decode below if needed
-      // you might also receive C, D, Y etc (Cashu-specific fields)
-    }
   }
 
-  struct MeltResponse: Decodable {
-    let paid: Bool
-    let preimage: String?
-  }
+  struct MeltResponse: Decodable { let paid: Bool; let preimage: String? }
 
-  // MARK: MintAPI
+  // MARK: - MintAPI
 
   func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
-    // Example: POST { amount } to /v1/mint/quote/bolt11
-    // Adjust path/keys for your mint
-    let url = baseURL.appendingPathComponent("v1/mint/quote/bolt11")
-    let body = ["amount": amount]
-    let resp: QuoteResponse = try await postJSON(url: url, body: body)
-    return (invoice: resp.invoice, expiresAt: resp.expiresAt, quoteId: resp.quoteId)
+    // 0) Reachability check
+    _ = try await getJSON(InfoResponse.self, path: "/v1/info")
+
+    // 1) Try GET style first: /v1/mint/quote/bolt11?amount=100&unit=sat
+    do {
+      let q: QuoteResponse = try await getJSON(QuoteResponse.self, path: "/v1/mint/quote/bolt11", query: ["amount": String(amount), "unit": "sat"])
+      return (q.invoice, q.expiresAt, q.quoteId)
+    } catch {
+      print("RealMintAPI GET quote failed, will try POST:", error)
+    }
+
+    // 2) Fallback: POST style { amount: 100 }
+    let q: QuoteResponse = try await postJSON(QuoteResponse.self, path: "/v1/mint/quote/bolt11", body: ["amount": amount])
+    return (q.invoice, q.expiresAt, q.quoteId)
   }
 
   func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus {
-    // Some mints require a quoteId. If you have it on your Quote, use that instead.
-    // Example with invoice hash: GET /v1/mint/quote/bolt11/status?invoice=...
-    var comps = URLComponents(url: baseURL.appendingPathComponent("v1/mint/quote/bolt11/status"), resolvingAgainstBaseURL: false)!
-    comps.queryItems = [URLQueryItem(name: "invoice", value: invoice)]
-    let url = comps.url!
-    let status: StatusResponse = try await getJSON(url: url)
-    return status.paid ? .paid : .pending
+    // Common: GET /v1/mint/quote/bolt11/status?invoice=...
+    do {
+      let s: StatusResponse = try await getJSON(StatusResponse.self, path: "/v1/mint/quote/bolt11/status", query: ["invoice": invoice])
+      return s.paid ? .paid : .pending
+    } catch {
+      print("RealMintAPI status check error:", error)
+      throw error
+    }
   }
 
   func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
-    // Example: POST /v1/mint with { invoice }
-    let url = baseURL.appendingPathComponent("v1/mint")
-    let body = ["invoice": invoice]
-    let minted: MintTokenResponse = try await postJSON(url: url, body: body)
-
-    // Map server proofs -> demo Proof model
-    return minted.proofs.map { mp in
-      Proof(
-        amount: mp.amount,
-        mint: mint,
-        secret: Data(hexOrBase64: mp.secret) ?? Data()
-      )
-    }
+    // Typical: POST /v1/mint { invoice }
+    let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])
+    return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
   }
 
   func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> String {
-    // Example: POST /v1/melt/bolt11 with { invoice, proofs }
-    let url = baseURL.appendingPathComponent("v1/melt/bolt11")
-
+    // Typical: POST /v1/melt/bolt11 { invoice, proofs }
     let payload: [String: Any] = [
       "invoice": destination,
       "proofs": proofs.map { ["amount": $0.amount, "secret": $0.secret.hexString] }
-      // Adjust to actual proof payload your mint expects
     ]
-
-    let resp: MeltResponse = try await postJSON(url: url, anyBody: payload)
-    guard resp.paid, let preimage = resp.preimage else {
-      throw CashuError.protocolError("Melt failed or unpaid")
-    }
-    return preimage
+    let r: MeltResponse = try await postJSON(MeltResponse.self, path: "/v1/melt/bolt11", anyBody: payload)
+    guard r.paid, let pre = r.preimage else { throw CashuError.protocolError("Melt failed or unpaid") }
+    return pre
   }
 
   // MARK: - Networking helpers
 
-  private func getJSON<T: Decodable>(url: URL) async throws -> T {
+  private func makeURL(path: String, query: [String: String]? = nil) -> URL {
+    var comps = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+    if let query { comps.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) } }
+    return comps.url!
+  }
+
+  private func getJSON<T: Decodable>(_ type: T.Type, path: String, query: [String: String]? = nil) async throws -> T {
+    let url = makeURL(path: path, query: query)
     var req = URLRequest(url: url)
     req.httpMethod = "GET"
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    let (data, response) = try await urlSession.data(for: req)
-    try ensureOK(response)
-    return try decodeJSON(data)
+    let (data, resp) = try await urlSession.data(for: req)
+    try ensureOK(resp, url: url)
+    return try decodeJSON(T.self, data: data)
   }
 
-  private func postJSON<T: Decodable>(url: URL, body: [String: Any]) async throws -> T {
-    try await postJSON(url: url, anyBody: body)
+  private func postJSON<T: Decodable>(_ type: T.Type, path: String, body: [String: Any]) async throws -> T {
+    try await postJSON(type, path: path, anyBody: body)
   }
 
-  private func postJSON<T: Decodable>(url: URL, anyBody: [String: Any]) async throws -> T {
+  private func postJSON<T: Decodable>(_ type: T.Type, path: String, anyBody: [String: Any]) async throws -> T {
+    let url = makeURL(path: path)
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
     req.httpBody = try JSONSerialization.data(withJSONObject: anyBody, options: [])
-    let (data, response) = try await urlSession.data(for: req)
-    try ensureOK(response)
-    return try decodeJSON(data)
+    let (data, resp) = try await urlSession.data(for: req)
+    try ensureOK(resp, url: url)
+    return try decodeJSON(T.self, data: data)
   }
 
-  private func ensureOK(_ resp: URLResponse) throws {
-    guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-      throw CashuError.network("HTTP \( (resp as? HTTPURLResponse)?.statusCode ?? -1)")
+  private func ensureOK(_ resp: URLResponse, url: URL) throws {
+    guard let http = resp as? HTTPURLResponse else { throw CashuError.network("No HTTPURLResponse for \(url)") }
+    guard (200..<300).contains(http.statusCode) else {
+      let msg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+      throw CashuError.network("HTTP \(http.statusCode) (\(msg)) for \(url)")
     }
   }
 
-  private func decodeJSON<T: Decodable>(_ data: Data) throws -> T {
+  private func decodeJSON<T: Decodable>(_ type: T.Type, data: Data) throws -> T {
     let dec = JSONDecoder()
     dec.dateDecodingStrategy = .iso8601
     return try dec.decode(T.self, from: data)
@@ -139,7 +162,7 @@ private extension Data {
     return nil
   }
   init?(hex: String) {
-    let s = hex.dropPrefixIfNeeded("0x")
+    let s = hex.hasPrefix("0x") ? String(hex.dropFirst(2)) : hex
     let len = s.count
     guard len % 2 == 0 else { return nil }
     var data = Data(capacity: len/2)
@@ -155,10 +178,4 @@ private extension Data {
     self = data
   }
   var hexString: String { self.map { String(format: "%02x", $0) }.joined() }
-}
-
-private extension StringProtocol {
-  func dropPrefixIfNeeded(_ p: String) -> SubSequence {
-    hasPrefix(p) ? dropFirst(p.count) : self[...]
-  }
 }
