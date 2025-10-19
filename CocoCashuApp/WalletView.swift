@@ -13,6 +13,10 @@ struct WalletView: View {
     @State private var withdrawAmount = ""
     @State private var isWithdrawing = false
     @State private var withdrawError: String? = nil
+    // Payment tracking state
+    @State private var isPolling = false
+    @State private var paymentStatus: String? = nil
+    @State private var lastQuoteId: String? = nil
     
   private let demoMint = URL(string: "https://mint.test")!
     let activeMint = URL(string: "https://cashu.cz")! // or mint.coinos.io, etc.
@@ -125,22 +129,72 @@ struct WalletView: View {
               print("WalletView: Mint 100 sats (real)")
             Task {
                 let mint = activeMint
-              let manager = wallet.manager
-              let api = RealMintAPI(baseURL: mint)
-              let flow = MintCoordinator(manager: manager, api: api)
+                let manager = wallet.manager
+                let api = RealMintAPI(baseURL: mint)
+                let flow = MintCoordinator(manager: manager, api: api)
                 let (invoice, qid) = try await flow.topUp(mint: mint, amount: 100)
                 lastInvoice = invoice
+                lastQuoteId = qid
+                paymentStatus = "Waiting for payment…"
                 showInvoice = true
-                
-                
+
                 print("WalletView invoice:", invoice)
-                // Wait for payment
-                try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
-                try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid)
+                // Start background polling so user can scan QR and we auto-dismiss on success
+                isPolling = true
+                Task {
+                  do {
+                    try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
+                    paymentStatus = "Paid. Fetching tokens…"
+                    try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid)
+                    paymentStatus = "Tokens received"
+                    isPolling = false
+                    showInvoice = false
+                    lastInvoice = nil
+                    lastQuoteId = nil
+                  } catch {
+                    paymentStatus = "Error: \(error)"
+                    isPolling = false
+                  }
+                }
             }
           }
           .sheet(isPresented: $showInvoice) {
-            InvoiceSheet(invoice: lastInvoice ?? "")
+            VStack(spacing: 16) {
+              InvoiceSheet(invoice: lastInvoice ?? "")
+              if let status = paymentStatus {
+                Text(status)
+                  .font(.footnote)
+                  .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)
+              }
+              HStack {
+                if isPolling { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("I’ve paid – Refresh") {
+                  guard let manager = Optional(wallet.manager),
+                        let invoice = lastInvoice else { return }
+                  let flow = MintCoordinator(manager: manager, api: RealMintAPI(baseURL: activeMint))
+                  isPolling = true
+                  Task {
+                    do {
+                      try await flow.pollUntilPaid(mint: activeMint, invoice: invoice, quoteId: lastQuoteId)
+                      paymentStatus = "Paid. Fetching tokens…"
+                      try await flow.receiveTokens(mint: activeMint, invoice: invoice, quoteId: lastQuoteId)
+                      paymentStatus = "Tokens received"
+                      isPolling = false
+                      showInvoice = false
+                      lastInvoice = nil
+                      lastQuoteId = nil
+                    } catch {
+                      paymentStatus = "Error: \(error)"
+                      isPolling = false
+                    }
+                  }
+                }
+              }
+              .padding(.horizontal)
+            }
+            .padding()
+            .frame(minWidth: 360)
           }
           
           Button("Pay LN invoice") {

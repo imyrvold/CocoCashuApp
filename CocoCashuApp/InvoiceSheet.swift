@@ -5,7 +5,7 @@ struct InvoiceSheet: View {
   var body: some View {
     VStack(spacing: 16) {
       Text("Pay this invoice").font(.headline)
-      if let img = qrImage(from: invoice) {
+      if let img = qrImage(from: "lightning:\(invoice)") {
         Image(nsImage: img) // use UIImage on iOS
           .interpolation(.none)
           .resizable()
