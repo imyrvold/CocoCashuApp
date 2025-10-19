@@ -6,12 +6,25 @@
 //
 
 import SwiftUI
+import CocoCashuUI
 
 @main
 struct CocoCashuAppApp: App {
+    @State private var wallet: ObservableWallet?
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if let wallet {
+                    WalletView(wallet: wallet)
+                } else {
+                    ProgressView("Loading wallet…")
+                }
+            }
+            .task {
+                // build wallet once when app starts
+                wallet = await CashuBootstrap.makeWallet()
+            }
         }
     }
 }
