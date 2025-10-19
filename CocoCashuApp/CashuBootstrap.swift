@@ -14,8 +14,8 @@ enum CashuBootstrap {
 
     // Minimal API stub – replace with your real mint API later.
     struct DemoAPI: MintAPI {
-      func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?) {
-        ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600))
+        func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
+            ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600), nil)
       }
       func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus { .paid }
       func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
@@ -26,12 +26,13 @@ enum CashuBootstrap {
       }
     }
 
+    let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)
     let manager = CashuManager(
       proofRepo: proofRepo,
       mintRepo: mintRepo,
       quoteRepo: quoteRepo,
       counterRepo: counterRepo,
-      api: DemoAPI()
+      api: api //DemoAPI()
     )
 
     return ObservableWallet(manager: manager)

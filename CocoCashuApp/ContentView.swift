@@ -26,9 +26,9 @@ struct ContentView: View {
 }
 
 struct DemoAPI: MintAPI {
-  func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?) {
+    func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
     // Call your real mint endpoint here
-    return ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600))
+    ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600), nil)
   }
   func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus { .paid }
   func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
@@ -55,3 +55,4 @@ func makeManager() async throws -> CashuManager {
     api: api
   )
 }
+

@@ -51,6 +51,32 @@ struct WalletView: View {
             try? await wallet.manager.proofService.spend(amount: 50, from: demoMint)
           }
         }
+          
+          Button("Mint 100 sats (real)") {
+              print("WalletView: Mint 100 sats (real)")
+            Task {
+              let mint = demoMint
+              let manager = wallet.manager
+              let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)
+              let flow = MintCoordinator(manager: manager, api: api)
+              let (invoice, _) = try await flow.topUp(mint: mint, amount: 100)
+                print("WalletView invoice:", invoice)
+              // TODO: show a sheet with the BOLT11 invoice for the user to pay
+              try await flow.pollUntilPaid(mint: mint, invoice: invoice)
+              try await flow.receiveTokens(mint: mint, invoice: invoice)
+            }
+          }
+          
+          Button("Pay LN invoice") {
+            Task {
+              let destination = "lnbc1p...YOURINVOICE..."
+              let mint = demoMint
+              // Choose an amount (parse from invoice ideally)
+              try await wallet.manager.mintService.spend(amount: 50, from: mint, to: destination)
+              // If your melt returns change proofs, call proofService.addNew(changeProofs)
+              // In our demo, melt returns only a preimage; you can follow with markSpent if needed.
+            }
+          }
       }
       .buttonStyle(.borderedProminent)
     }
@@ -61,6 +87,18 @@ struct WalletView: View {
     let proofs = wallet.proofsByMint[mint.absoluteString] ?? []
     return proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
   }
+    
+    // 1) Ask mint for invoice
+    func startTopUp(_ sats: Int64) {
+      Task {
+        let mintURL = demoMint
+        // create quote: get invoice + optional quoteId stored in QuoteService (if you wire that)
+        // or call API directly and store a local Quote:
+        let api = (wallet.manager as AnyObject) // just to hint location; you can hold api in manager or expose via method
+        // For a quick start, call the API directly if you’ve kept a reference,
+        // otherwise add a small MintCoordinator that uses wallet.manager.quoteService + mintService
+      }
+    }
 }
 
 private struct ProofRow: View {
