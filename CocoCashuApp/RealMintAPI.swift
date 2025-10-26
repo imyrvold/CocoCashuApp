@@ -62,23 +62,25 @@ struct RealMintAPI: MintAPI {
     // 0) Reachability check
       let _ : InfoResponse = try await getJSON(InfoResponse.self, path: "/v1/info")
       print("RealMintAPI reachability ok: /v1/info")
-      
+      print("RealMintAPI ggsd", #function, "1")
     // 1) Try GET style first: /v1/mint/quote/bolt11?amount=100&unit=sat
-    do {
-      let q: QuoteResponse = try await getJSON(QuoteResponse.self, path: "/v1/mint/quote/bolt11", query: ["amount": String(amount), "unit": "sat"])
-      return (q.invoice, q.expiresAt, q.quoteId)
-    } catch {
-      print("RealMintAPI GET quote failed, will try POST:", error)
-    }
+//    do {
+//      let q: QuoteResponse = try await getJSON(QuoteResponse.self, path: "/v1/mint/quote/bolt11", query: ["amount": String(amount), "unit": "sat"])
+//      return (q.invoice, q.expiresAt, q.quoteId)
+//    } catch {
+//      print("RealMintAPI GET quote failed, will try POST:", error)
+//    }
 
       // 2) Fallback: POST style { amount: 100, unit: "sat" }
       do {
         let q: QuoteResponse = try await postJSON(QuoteResponse.self,
                                                  path: "/v1/mint/quote/bolt11",
                                                  body: ["amount": amount, "unit": "sat"])
+          print("RealMintAPI ggsd", #function, "2")
         print("RealMintAPI POST quote ok")
         return (q.invoice, q.expiresAt, q.quoteId)
       } catch {
+          print("RealMintAPI ggsd", #function, "3")
         print("RealMintAPI POST quote error:", error)
         throw error
       }
@@ -87,22 +89,56 @@ struct RealMintAPI: MintAPI {
   func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus {
     // Common: GET /v1/mint/quote/bolt11/status?invoice=...
     do {
+        print("RealMintAPI ggsd", #function, "1")
       let s: StatusResponse = try await getJSON(StatusResponse.self, path: "/v1/mint/quote/bolt11/status", query: ["invoice": invoice])
+        print("RealMintAPI ggsd", #function, "2")
       return s.paid ? .paid : .pending
     } catch {
+        print("RealMintAPI ggsd", #function, "3", error)
       print("RealMintAPI status check error:", error)
       throw error
     }
   }
 
     // Some mints require quote id instead of invoice for status
-    func checkQuoteStatus(quoteId: String) async throws -> QuoteStatus {
+/*    func checkQuoteStatus(quoteId: String) async throws -> QuoteStatus {
       let s: StatusResponse = try await getJSON(StatusResponse.self,
                                                 path: "/v1/mint/quote/bolt11/status",
                                                 query: ["quote": quoteId])
       return s.paid ? .paid : .pending
+    }*/
+    // Some mints require quote id instead of invoice for status
+    func checkQuoteStatus(quoteId: String) async throws -> QuoteStatus {
+      // Try the correct Cashu.cz pattern first
+      do {
+        let s: StatusResponse = try await getJSON(
+          StatusResponse.self,
+          path: "/v1/mint/quote/bolt11/\(quoteId)"
+        )
+        return s.paid ? .paid : .pending
+      } catch {
+        // Try older pattern: /quote/{quoteId}/bolt11
+        do {
+          let s: StatusResponse = try await getJSON(
+            StatusResponse.self,
+            path: "/v1/mint/quote/\(quoteId)/bolt11"
+          )
+          return s.paid ? .paid : .pending
+        } catch {
+          // Fallback: /v1/mint/quote/bolt11/status/{quoteId}
+          do {
+            let s: StatusResponse = try await getJSON(
+              StatusResponse.self,
+              path: "/v1/mint/quote/bolt11/status/\(quoteId)"
+            )
+            return s.paid ? .paid : .pending
+          } catch {
+            throw CashuError.network("Could not check status for quote id \(quoteId): \(error)")
+          }
+        }
+      }
     }
-
+    
     func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
         // Typical: POST /v1/mint { invoice }
         let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])

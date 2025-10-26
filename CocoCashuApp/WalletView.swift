@@ -6,8 +6,7 @@ import CocoCashuCore
 
 struct WalletView: View {
   @Bindable var wallet: ObservableWallet
-    @State private var showInvoice = false
-    @State private var lastInvoice: String?
+    @State private var invoiceItem: InvoiceItem? = nil
     @State private var showWithdraw = false
     @State private var withdrawInvoice = ""
     @State private var withdrawAmount = ""
@@ -16,7 +15,6 @@ struct WalletView: View {
     // Payment tracking state
     @State private var isPolling = false
     @State private var paymentStatus: String? = nil
-    @State private var lastQuoteId: String? = nil
     
   private let demoMint = URL(string: "https://mint.test")!
     let activeMint = URL(string: "https://cashu.cz")! // or mint.coinos.io, etc.
@@ -64,8 +62,8 @@ struct WalletView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.footnote)
                 .textSelection(.enabled)
-                .onChange(of: withdrawInvoice) { newValue in
-                  if let sats = parseSatsFromBOLT11(newValue) {
+                .onChange(of: withdrawInvoice) {
+                  if let sats = parseSatsFromBOLT11(withdrawInvoice) {
                     withdrawAmount = String(sats)
                   }
                 }
@@ -133,24 +131,24 @@ struct WalletView: View {
                 let api = RealMintAPI(baseURL: mint)
                 let flow = MintCoordinator(manager: manager, api: api)
                 let (invoice, qid) = try await flow.topUp(mint: mint, amount: 100)
-                lastInvoice = invoice
-                lastQuoteId = qid
-                paymentStatus = "Waiting for payment…"
-                showInvoice = true
-
+                await MainActor.run {
+                  self.invoiceItem = InvoiceItem(
+                    invoice: invoice.trimmingCharacters(in: .whitespacesAndNewlines),
+                    quoteId: qid
+                  )
+                  self.paymentStatus = "Waiting for payment…"
+                }
+                await MainActor.run { self.isPolling = true }
                 print("WalletView invoice:", invoice)
                 // Start background polling so user can scan QR and we auto-dismiss on success
-                isPolling = true
                 Task {
                   do {
                     try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
                     paymentStatus = "Paid. Fetching tokens…"
                     try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid)
-                    paymentStatus = "Tokens received"
-                    isPolling = false
-                    showInvoice = false
-                    lastInvoice = nil
-                    lastQuoteId = nil
+                      paymentStatus = "Tokens received"
+                      isPolling = false
+                      invoiceItem = nil
                   } catch {
                     paymentStatus = "Error: \(error)"
                     isPolling = false
@@ -158,32 +156,31 @@ struct WalletView: View {
                 }
             }
           }
-          .sheet(isPresented: $showInvoice) {
+          .sheet(item: $invoiceItem) { item in
             VStack(spacing: 16) {
-              InvoiceSheet(invoice: lastInvoice ?? "")
+              InvoiceSheet(invoice: item.invoice)
+
               if let status = paymentStatus {
                 Text(status)
                   .font(.footnote)
                   .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)
               }
+
               HStack {
                 if isPolling { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("I’ve paid – Refresh") {
-                  guard let manager = Optional(wallet.manager),
-                        let invoice = lastInvoice else { return }
+                  let manager = wallet.manager
                   let flow = MintCoordinator(manager: manager, api: RealMintAPI(baseURL: activeMint))
                   isPolling = true
                   Task {
                     do {
-                      try await flow.pollUntilPaid(mint: activeMint, invoice: invoice, quoteId: lastQuoteId)
+                      try await flow.pollUntilPaid(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId)
                       paymentStatus = "Paid. Fetching tokens…"
-                      try await flow.receiveTokens(mint: activeMint, invoice: invoice, quoteId: lastQuoteId)
+                      try await flow.receiveTokens(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId)
                       paymentStatus = "Tokens received"
                       isPolling = false
-                      showInvoice = false
-                      lastInvoice = nil
-                      lastQuoteId = nil
+                      invoiceItem = nil
                     } catch {
                       paymentStatus = "Error: \(error)"
                       isPolling = false
@@ -273,4 +270,10 @@ private func parseSatsFromBOLT11(_ bolt11: String) -> Int64? {
   default:
     return nil
   }
+}
+
+private struct InvoiceItem: Identifiable {
+  let id = UUID()
+  let invoice: String
+  let quoteId: String?
 }

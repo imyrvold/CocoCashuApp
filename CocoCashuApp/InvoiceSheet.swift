@@ -5,14 +5,37 @@ struct InvoiceSheet: View {
   var body: some View {
     VStack(spacing: 16) {
       Text("Pay this invoice").font(.headline)
-      if let img = qrImage(from: "lightning:\(invoice)") {
+        let _ = print("InvoiceSheet incoming invoice:", invoice)
+      // Sanitize: trim whitespace and strip any lightning: prefix (with or without //)
+        let cleaned = invoice
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+          .replacingOccurrences(of: "lightning://", with: "", options: .caseInsensitive)
+          .replacingOccurrences(of: "lightning:", with: "", options: .caseInsensitive)
+
+        let _ = print("InvoiceSheet incoming invoice:", invoice)
+        let qrPayload = cleaned.isEmpty ? nil : "lightning:\(cleaned)"
+      let _ = print("InvoiceSheet qr cleaned:", cleaned)
+      let _ = print("InvoiceSheet qr payload:", qrPayload ?? "<nil>")
+
+      if let payload = qrPayload, let img = qrImage(from: payload) {
         Image(nsImage: img) // use UIImage on iOS
           .interpolation(.none)
           .resizable()
           .frame(width: 220, height: 220)
+      } else {
+        Text("Invoice missing or invalid").foregroundStyle(.red)
       }
-      ScrollView { Text(invoice).font(.footnote).textSelection(.enabled) }
-      Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(invoice, forType: .string) }
+
+      // Show the cleaned raw bolt11 for copy/debug
+      ScrollView { Text(cleaned).font(.footnote).textSelection(.enabled) }
+      HStack {
+        Button("Copy bolt11") {
+          NSPasteboard.general.clearContents(); NSPasteboard.general.setString(cleaned, forType: .string)
+        }
+        Button("Copy lightning:") {
+          NSPasteboard.general.clearContents(); NSPasteboard.general.setString("lightning:\(cleaned)", forType: .string)
+        }
+      }
     }
     .padding()
     .frame(minWidth: 320, minHeight: 420)
