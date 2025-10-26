@@ -275,7 +275,7 @@ struct RealMintAPI: MintAPI {
     req.httpMethod = "GET"
     req.setValue("application/json", forHTTPHeaderField: "Accept")
     let (data, resp) = try await urlSession.data(for: req)
-    try ensureOK(resp, url: url)
+    try ensureOK(resp, url: url, data: data)
     return try decodeJSON(T.self, data: data)
   }
 
@@ -291,16 +291,20 @@ struct RealMintAPI: MintAPI {
     req.setValue("application/json", forHTTPHeaderField: "Accept")
     req.httpBody = try JSONSerialization.data(withJSONObject: anyBody, options: [])
     let (data, resp) = try await urlSession.data(for: req)
-    try ensureOK(resp, url: url)
+      try ensureOK(resp, url: url, data: data)
     return try decodeJSON(T.self, data: data)
   }
 
-  private func ensureOK(_ resp: URLResponse, url: URL) throws {
-    guard let http = resp as? HTTPURLResponse else { throw CashuError.network("No HTTPURLResponse for \(url)") }
-    guard (200..<300).contains(http.statusCode) else {
-      let msg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
-      throw CashuError.network("HTTP \(http.statusCode) (\(msg)) for \(url)")
-    }
+    private func ensureOK(_ resp: URLResponse, url: URL, data: Data) throws {
+      guard let http = resp as? HTTPURLResponse else {
+        throw CashuError.network("No HTTPURLResponse for \(url)")
+      }
+      guard (200..<300).contains(http.statusCode) else {
+        let msg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+        let body = String(data: data, encoding: .utf8) ?? "<binary>"
+        let snippet = body.prefix(280)
+        throw CashuError.network("HTTP \(http.statusCode) (\(msg)) for \(url) — body: \(snippet)")
+      }
   }
 
   private func decodeJSON<T: Decodable>(_ type: T.Type, data: Data) throws -> T {
@@ -315,7 +319,7 @@ struct RealMintAPI: MintAPI {
       req.httpMethod = "GET"
       req.setValue("application/json", forHTTPHeaderField: "Accept")
       let (data, resp) = try await urlSession.data(for: req)
-      try ensureOK(resp, url: url)
+        try ensureOK(resp, url: url, data: data)
       return data
     }
 
@@ -404,10 +408,10 @@ struct RealMintAPI: MintAPI {
     /// Execute a PAID mint quote by submitting blinded outputs.
     /// Returns the raw blind signatures; you must unblind to create Proofs.
     func executeMint(quoteId: String, outputs: [BlindedMessageDTO]) async throws -> [MintExecResponse.BlindSig] {
-        // We will try several endpoint/body variants to interop with differing mint deployments.
-        let pathA = "/v1/mint/quote/bolt11/\(quoteId)"       // NUT-04 path-param style
-        let pathB = "/v1/mint/quote/\(quoteId)/bolt11"       // legacy swapped segments
-        let pathC = "/v1/mint/bolt11"                         // body carries the quote id
+        // Paths
+        let pathA = "/v1/mint/quote/bolt11/\(quoteId)"   // NUT-04 path-param style
+        let pathB = "/v1/mint/quote/\(quoteId)/bolt11"   // legacy swapped segments
+        let pathC = "/v1/mint/bolt11"                    // body carries the quote id
 
         // Bodies
         let outputs_B_: [[String: Any]] = outputs.map { [
@@ -419,68 +423,45 @@ struct RealMintAPI: MintAPI {
             "B": $0.B_
         ]}
 
-        // Lazy keyset fetch (only if needed)
-        func outputsWithId(_ arr: [[String: Any]], id: String) -> [[String: Any]] {
-            arr.map { o in
-                var m = o; m["id"] = id; return m
-            }
-        }
-
-        // Try helpers
-        func tryPOST(path: String, body: [String: Any]) async throws -> [MintExecResponse.BlindSig] {
+        func tryPOST(_ label: String, path: String, body: [String: Any]) async throws -> [MintExecResponse.BlindSig] {
+            print("RealMintAPI executeMint try \(label): POST \(path) body keys: \(Array(body.keys))")
             let r: MintExecResponse = try await postJSON(MintExecResponse.self, path: path, anyBody: body)
             return r.all
         }
 
         // 1) POST /v1/mint/quote/bolt11/{quote} with { outputs: [{amount,B_}] }
-        do {
-            return try await tryPOST(path: pathA, body: ["outputs": outputs_B_])
-        } catch {}
-
+        if let r = try? await tryPOST("A1 B_", path: pathA, body: ["outputs": outputs_B_]) { return r }
         // 2) Same path, key "B"
-        do {
-            return try await tryPOST(path: pathA, body: ["outputs": outputs_B])
-        } catch {}
+        if let r = try? await tryPOST("A2 B", path: pathA, body: ["outputs": outputs_B]) { return r }
 
         // 3) Legacy path: /v1/mint/quote/{quote}/bolt11, with B_
-        do {
-            return try await tryPOST(path: pathB, body: ["outputs": outputs_B_])
-        } catch {}
-
+        if let r = try? await tryPOST("B1 B_", path: pathB, body: ["outputs": outputs_B_]) { return r }
         // 4) Legacy path + key "B"
-        do {
-            return try await tryPOST(path: pathB, body: ["outputs": outputs_B])
-        } catch {}
+        if let r = try? await tryPOST("B2 B", path: pathB, body: ["outputs": outputs_B]) { return r }
 
-        // 5) Body carries the quote id: POST /v1/mint/bolt11 { quote, outputs: [{amount,B_}] }
-        do {
-            return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputs_B_])
-        } catch {}
+        // 5) Body carries the quote id: POST /v1/mint/bolt11 { quote, outputs }
+        if let r = try? await tryPOST("C1 B_", path: pathC, body: ["quote": quoteId, "outputs": outputs_B_]) { return r }
+        if let r = try? await tryPOST("C2 B", path: pathC, body: ["quote": quoteId, "outputs": outputs_B]) { return r }
 
-        // 6) Same with key "B"
-        do {
-            return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputs_B])
-        } catch {}
-
-        // 7) Some servers require keyset id per output. Fetch and retry.
-        let keyset = try? await fetchKeyset()
-        if let kid = keyset?.id {
-            // 7a) Path A + id + B_
-            do {
-                return try await tryPOST(path: pathA, body: ["outputs": outputsWithId(outputs_B_, id: kid)])
-            } catch {}
-            // 7b) Path A + id + B
-            do {
-                return try await tryPOST(path: pathA, body: ["outputs": outputsWithId(outputs_B, id: kid)])
-            } catch {}
-            // 7c) Path C with quote in body + id + B_
-            do {
-                return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputsWithId(outputs_B_, id: kid)])
-            } catch {}
-            // 7d) Path C with quote in body + id + B
-            do {
-                return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputsWithId(outputs_B, id: kid)])
-            } catch {}
+        // 6) Some servers require keyset id at top level or per output
+        if let keyset = try? await fetchKeyset(), !keyset.keys.isEmpty {
+            let kid = keyset.id
+            // 6a) Path A + top-level id + B_
+            if let r = try? await tryPOST("A3 id+B_", path: pathA, body: ["id": kid, "outputs": outputs_B_]) { return r }
+            // 6b) Path A + top-level id + B
+            if let r = try? await tryPOST("A4 id+B", path: pathA, body: ["id": kid, "outputs": outputs_B]) { return r }
+            // 6c) Path C with quote + top-level id + B_
+            if let r = try? await tryPOST("C3 quote+id+B_", path: pathC, body: ["quote": quoteId, "id": kid, "outputs": outputs_B_]) { return r }
+            // 6d) Path C with quote + top-level id + B
+            if let r = try? await tryPOST("C4 quote+id+B", path: pathC, body: ["quote": quoteId, "id": kid, "outputs": outputs_B]) { return r }
+            // 6e) Per-output id on Path A (B_ then B)
+            let withId_B_ = outputs_B_.map { var m = $0; m["id"] = kid; return m }
+            let withId_B  = outputs_B.map  { var m = $0; m["id"] = kid; return m }
+            if let r = try? await tryPOST("A5 id-per-output B_", path: pathA, body: ["outputs": withId_B_]) { return r }
+            if let r = try? await tryPOST("A6 id-per-output B",  path: pathA, body: ["outputs": withId_B])  { return r }
+            // 6f) Path C + quote + id-per-output (B_ then B)
+            if let r = try? await tryPOST("C5 quote+id-per-output B_", path: pathC, body: ["quote": quoteId, "outputs": withId_B_]) { return r }
+            if let r = try? await tryPOST("C6 quote+id-per-output B",  path: pathC, body: ["quote": quoteId, "outputs": withId_B])  { return r }
         }
 
         throw CashuError.network("NUT-04 execute failed for quote \(quoteId) on all endpoint variants")
