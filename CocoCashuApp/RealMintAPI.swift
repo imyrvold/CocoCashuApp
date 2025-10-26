@@ -51,7 +51,37 @@ struct RealMintAPI: MintAPI {
 
   struct MintTokenResponse: Decodable {
     struct MintProof: Decodable { let amount: Int64; let secret: String }
+
     let proofs: [MintProof]
+    let rawTokenString: String?
+
+    private enum CodingKeys: String, CodingKey { case proofs, token, tokens }
+
+    private struct TokenObject: Decodable { let proofs: [MintProof]? }
+    private struct TokenEntry: Decodable { let mint: String?; let proofs: [MintProof] }
+
+    init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      if let direct = try c.decodeIfPresent([MintProof].self, forKey: .proofs) {
+        self.proofs = direct; self.rawTokenString = nil; return
+      }
+      if c.contains(.token) {
+        if let obj = try? c.decode(TokenObject.self, forKey: .token), let p = obj.proofs {
+          self.proofs = p; self.rawTokenString = nil; return
+        }
+        if let arr = try? c.decode([TokenEntry].self, forKey: .token), let first = arr.first {
+          self.proofs = first.proofs; self.rawTokenString = nil; return
+        }
+        if let tokenString = try? c.decode(String.self, forKey: .token) { // cashuA... string
+          print("RealMintAPI redeem: got string token (not parsed):", tokenString.prefix(32), "…")
+          self.proofs = []; self.rawTokenString = tokenString; return
+        }
+      }
+      if let arr = try? c.decode([TokenEntry].self, forKey: .tokens), let first = arr.first {
+        self.proofs = first.proofs; self.rawTokenString = nil; return
+      }
+      throw DecodingError.keyNotFound(CodingKeys.proofs, .init(codingPath: decoder.codingPath, debugDescription: "No proofs in response"))
+    }
   }
 
   struct MeltResponse: Decodable { let paid: Bool; let preimage: String?; let change: [MintTokenResponse.MintProof]? }
@@ -141,16 +171,80 @@ struct RealMintAPI: MintAPI {
     
     func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
         // Typical: POST /v1/mint { invoice }
-        let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])
-        return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+        do {
+          let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])
+          return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+        } catch {
+          // Fallback body key used by some mints
+          do {
+            let r2: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["payment_request": invoice])
+            return r2.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+          } catch {
+            throw error
+          }
+        }
     }
 
     // Some mints deliver tokens by quote id instead of invoice
     func requestTokens(quoteId: String, mint: MintURL) async throws -> [Proof] {
-      let r: MintTokenResponse = try await postJSON(MintTokenResponse.self,
-                                                    path: "/v1/mint",
-                                                    body: ["quote": quoteId])
-      return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+      // A) cashu.cz: POST /v1/mint/quote/bolt11/{quoteId} {}
+      do {
+        print("RealMintAPI redeem: POST /v1/mint/quote/bolt11/\(quoteId) {}")
+        let r: MintTokenResponse = try await postJSON(MintTokenResponse.self,
+                                                      path: "/v1/mint/quote/bolt11/\(quoteId)",
+                                                      anyBody: [:])
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
+      } catch { print("RealMintAPI redeem POST quoteId path failed:", error) }
+
+      // B) cashu.cz variant: POST /v1/mint/quote/\(id)/bolt11 {}
+      do {
+        print("RealMintAPI redeem: POST /v1/mint/quote/\(quoteId)/bolt11 {}")
+        let r: MintTokenResponse = try await postJSON(MintTokenResponse.self,
+                                                      path: "/v1/mint/quote/\(quoteId)/bolt11",
+                                                      anyBody: [:])
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
+      } catch { print("RealMintAPI redeem POST quoteId/bolt11 failed:", error) }
+
+      // C) GET /v1/mint/quote/bolt11/{quoteId} — may include { token: "cashuA..." }
+      do {
+        print("RealMintAPI redeem: GET /v1/mint/quote/bolt11/\(quoteId)")
+        let data = try await getRaw(path: "/v1/mint/quote/bolt11/\(quoteId)")
+        if let s = String(data: data, encoding: .utf8) { print("RealMintAPI redeem GET raw:", s) }
+        // Try JSON -> { token: "cashuA..." } first
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let tokenStr = obj["token"] as? String, let parsed = parseCashuTokenString(tokenStr, mintURL: mint) {
+          return parsed
+        }
+        // Or decode structured proofs if present
+        if let r = try? decodeJSON(MintTokenResponse.self, data: data), !r.proofs.isEmpty {
+          return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+        }
+      } catch { print("RealMintAPI redeem GET quoteId path failed:", error) }
+
+      // D) Generic: POST /v1/mint with { quote: id }
+      if let r: MintTokenResponse = try? await postJSON(MintTokenResponse.self,
+                                                        path: "/v1/mint",
+                                                        body: ["quote": quoteId]) {
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
+      }
+
+      // E) Fallback keys
+      if let r: MintTokenResponse = try? await postJSON(MintTokenResponse.self,
+                                                        path: "/v1/mint",
+                                                        body: ["quote_id": quoteId]) {
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
+      }
+      if let r: MintTokenResponse = try? await postJSON(MintTokenResponse.self,
+                                                        path: "/v1/mint",
+                                                        body: ["id": quoteId]) {
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
+      }
+
+      throw CashuError.network("Could not redeem tokens for quote id \(quoteId)")
     }
 
   func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
@@ -214,7 +308,186 @@ struct RealMintAPI: MintAPI {
     dec.dateDecodingStrategy = .iso8601
     return try dec.decode(T.self, from: data)
   }
+    
+    private func getRaw(path: String, query: [String: String]? = nil) async throws -> Data {
+      let url = makeURL(path: path, query: query)
+      var req = URLRequest(url: url)
+      req.httpMethod = "GET"
+      req.setValue("application/json", forHTTPHeaderField: "Accept")
+      let (data, resp) = try await urlSession.data(for: req)
+      try ensureOK(resp, url: url)
+      return data
+    }
+
+    // Parse a string token like "cashuA..." into proofs
+    private func parseCashuTokenString(_ token: String, mintURL: MintURL) -> [Proof]? {
+      // Expect prefix "cashu" + version (e.g., 'A') followed by base64url payload
+      guard token.lowercased().hasPrefix("cashu"), token.count > 6 else { return nil }
+      let idx = token.index(token.startIndex, offsetBy: 6) // skip "cashu" + version char
+      let b64url = String(token[idx...])
+        .replacingOccurrences(of: "-", with: "+")
+        .replacingOccurrences(of: "_", with: "/")
+      let padded: String = {
+        let rem = b64url.count % 4
+        return rem == 0 ? b64url : b64url + String(repeating: "=", count: 4 - rem)
+      }()
+      guard let data = Data(base64Encoded: padded) else { return nil }
+        struct TokenRoot: Decodable {
+            struct Entry: Decodable {
+                let mint: String?
+                let proofs: [MintTokenResponse.MintProof] }
+            let token: [Entry]
+        }
+      guard let root = try? JSONDecoder().decode(TokenRoot.self, from: data), let first = root.token.first else { return nil }
+      return first.proofs.map { Proof(amount: $0.amount, mint: mintURL, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+    }
+
+    // Models for NUT-04 execution
+    struct BlindedMessageDTO: Encodable {
+      let amount: Int64
+      let B_: String   // blinded message
+    }
+
+    private struct MintExecRequest: Encodable {
+      let quote: String
+      let outputs: [BlindedMessageDTO]
+    }
+
+    struct MintExecResponse: Decodable {
+      // NUT-04 calls these "signatures"; some older mints say "promises"
+      struct BlindSig: Decodable { let amount: Int64; let C_: String?; let C: String? }
+
+      let signatures: [BlindSig]?
+      let promises: [BlindSig]?
+
+      var all: [BlindSig] { signatures ?? promises ?? [] }
+    }
+    
+    // MARK: - Modern NUT-04 redeem (for mints like cashu.cz)
+    func redeemNUT04(quoteId: String, outputs: [BlindedMessageDTO]) async throws -> [MintExecResponse.BlindSig] {
+        // Delegate to executeMint; kept for compatibility with callers
+        return try await executeMint(quoteId: quoteId, outputs: outputs)
+    }
+    
+    // MARK: - Keys (NUT-01) for blinding
+
+    struct KeysResponse: Decodable {
+      struct KeysetEntry: Decodable { let id: String?; let keys: [String:String] }
+      let keys: [String:String]?
+      let keysets: [KeysetEntry]?
+    }
+
+    // Convert whatever the mint gives us into Keyset(amount:Int64 -> pubkeyHex)
+    func fetchKeyset() async throws -> Keyset {
+      let r: KeysResponse = try await getJSON(KeysResponse.self, path: "/v1/keys")
+      if let ks = r.keysets?.first {
+          let raw = ks.keys
+        var map: [Int64:String] = [:]
+        for (k,v) in raw { if let a = Int64(k) { map[a] = v } }
+        return Keyset(id: ks.id ?? baseURL.absoluteString, keys: map)
+      }
+      if let raw = r.keys {
+        var map: [Int64:String] = [:]
+        for (k,v) in raw { if let a = Int64(k) { map[a] = v } }
+        return Keyset(id: baseURL.absoluteString, keys: map)
+      }
+      // Some mints expose { "1": "02ab...", "2": "03cd...", ... } at the top level
+      if let obj = try? await getRaw(path: "/v1/keys"),
+         let top = try? JSONSerialization.jsonObject(with: obj) as? [String:Any] {
+        var map: [Int64:String] = [:]
+        for (k,v) in top { if let a = Int64(k), let s = v as? String { map[a] = s } }
+        if !map.isEmpty { return Keyset(id: baseURL.absoluteString, keys: map) }
+      }
+      throw CashuError.protocolError("Mint /v1/keys did not contain a usable keyset")
+    }
+    
+    /// Execute a PAID mint quote by submitting blinded outputs.
+    /// Returns the raw blind signatures; you must unblind to create Proofs.
+    func executeMint(quoteId: String, outputs: [BlindedMessageDTO]) async throws -> [MintExecResponse.BlindSig] {
+        // We will try several endpoint/body variants to interop with differing mint deployments.
+        let pathA = "/v1/mint/quote/bolt11/\(quoteId)"       // NUT-04 path-param style
+        let pathB = "/v1/mint/quote/\(quoteId)/bolt11"       // legacy swapped segments
+        let pathC = "/v1/mint/bolt11"                         // body carries the quote id
+
+        // Bodies
+        let outputs_B_: [[String: Any]] = outputs.map { [
+            "amount": $0.amount,
+            "B_": $0.B_
+        ]}
+        let outputs_B: [[String: Any]] = outputs.map { [
+            "amount": $0.amount,
+            "B": $0.B_
+        ]}
+
+        // Lazy keyset fetch (only if needed)
+        func outputsWithId(_ arr: [[String: Any]], id: String) -> [[String: Any]] {
+            arr.map { o in
+                var m = o; m["id"] = id; return m
+            }
+        }
+
+        // Try helpers
+        func tryPOST(path: String, body: [String: Any]) async throws -> [MintExecResponse.BlindSig] {
+            let r: MintExecResponse = try await postJSON(MintExecResponse.self, path: path, anyBody: body)
+            return r.all
+        }
+
+        // 1) POST /v1/mint/quote/bolt11/{quote} with { outputs: [{amount,B_}] }
+        do {
+            return try await tryPOST(path: pathA, body: ["outputs": outputs_B_])
+        } catch {}
+
+        // 2) Same path, key "B"
+        do {
+            return try await tryPOST(path: pathA, body: ["outputs": outputs_B])
+        } catch {}
+
+        // 3) Legacy path: /v1/mint/quote/{quote}/bolt11, with B_
+        do {
+            return try await tryPOST(path: pathB, body: ["outputs": outputs_B_])
+        } catch {}
+
+        // 4) Legacy path + key "B"
+        do {
+            return try await tryPOST(path: pathB, body: ["outputs": outputs_B])
+        } catch {}
+
+        // 5) Body carries the quote id: POST /v1/mint/bolt11 { quote, outputs: [{amount,B_}] }
+        do {
+            return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputs_B_])
+        } catch {}
+
+        // 6) Same with key "B"
+        do {
+            return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputs_B])
+        } catch {}
+
+        // 7) Some servers require keyset id per output. Fetch and retry.
+        let keyset = try? await fetchKeyset()
+        if let kid = keyset?.id {
+            // 7a) Path A + id + B_
+            do {
+                return try await tryPOST(path: pathA, body: ["outputs": outputsWithId(outputs_B_, id: kid)])
+            } catch {}
+            // 7b) Path A + id + B
+            do {
+                return try await tryPOST(path: pathA, body: ["outputs": outputsWithId(outputs_B, id: kid)])
+            } catch {}
+            // 7c) Path C with quote in body + id + B_
+            do {
+                return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputsWithId(outputs_B_, id: kid)])
+            } catch {}
+            // 7d) Path C with quote in body + id + B
+            do {
+                return try await tryPOST(path: pathC, body: ["quote": quoteId, "outputs": outputsWithId(outputs_B, id: kid)])
+            } catch {}
+        }
+
+        throw CashuError.network("NUT-04 execute failed for quote \(quoteId) on all endpoint variants")
+    }
+    
 }
+
 
 // MARK: - Small helpers
 

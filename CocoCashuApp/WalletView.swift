@@ -123,14 +123,17 @@ struct WalletView: View {
           }
         }
           
-          Button("Mint 100 sats (real)") {
-              print("WalletView: Mint 100 sats (real)")
+          Button("Mint 10 sats (real)") {
+              print("WalletView: Mint 10 sats (real)")
             Task {
                 let mint = activeMint
                 let manager = wallet.manager
                 let api = RealMintAPI(baseURL: mint)
-                let flow = MintCoordinator(manager: manager, api: api)
-                let (invoice, qid) = try await flow.topUp(mint: mint, amount: 100)
+                let engine = CocoBlindingEngine { mintURL in
+                  try await RealMintAPI(baseURL: mintURL).fetchKeyset()
+                }
+                let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
+                let (invoice, qid) = try await flow.topUp(mint: mint, amount: 10)
                 await MainActor.run {
                   self.invoiceItem = InvoiceItem(
                     invoice: invoice.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -145,7 +148,7 @@ struct WalletView: View {
                   do {
                     try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
                     paymentStatus = "Paid. Fetching tokens…"
-                    try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid)
+                    try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid, amount: 10)
                       paymentStatus = "Tokens received"
                       isPolling = false
                       invoiceItem = nil
@@ -161,6 +164,7 @@ struct WalletView: View {
               InvoiceSheet(invoice: item.invoice)
 
               if let status = paymentStatus {
+                  let _ = print("WalletView paymentStatus:", status)
                 Text(status)
                   .font(.footnote)
                   .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)
@@ -171,13 +175,17 @@ struct WalletView: View {
                 Spacer()
                 Button("I’ve paid – Refresh") {
                   let manager = wallet.manager
-                  let flow = MintCoordinator(manager: manager, api: RealMintAPI(baseURL: activeMint))
-                  isPolling = true
+                    let api = RealMintAPI(baseURL: activeMint)
+                    let engine = CocoBlindingEngine { mintURL in
+                      try await RealMintAPI(baseURL: mintURL).fetchKeyset()
+                    }
+                    let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
+                    isPolling = true
                   Task {
                     do {
                       try await flow.pollUntilPaid(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId)
                       paymentStatus = "Paid. Fetching tokens…"
-                      try await flow.receiveTokens(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId)
+                      try await flow.receiveTokens(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId, amount: 10)
                       paymentStatus = "Tokens received"
                       isPolling = false
                       invoiceItem = nil
