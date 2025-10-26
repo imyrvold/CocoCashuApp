@@ -408,63 +408,25 @@ struct RealMintAPI: MintAPI {
     /// Execute a PAID mint quote by submitting blinded outputs.
     /// Returns the raw blind signatures; you must unblind to create Proofs.
     func executeMint(quoteId: String, outputs: [BlindedMessageDTO]) async throws -> [MintExecResponse.BlindSig] {
-        // Paths
-        let pathA = "/v1/mint/quote/bolt11/\(quoteId)"   // NUT-04 path-param style
-        let pathB = "/v1/mint/quote/\(quoteId)/bolt11"   // legacy swapped segments
-        let pathC = "/v1/mint/bolt11"                    // body carries the quote id
-
-        // Bodies
-        let outputs_B_: [[String: Any]] = outputs.map { [
-            "amount": $0.amount,
-            "B_": $0.B_
-        ]}
-        let outputs_B: [[String: Any]] = outputs.map { [
-            "amount": $0.amount,
-            "B": $0.B_
-        ]}
-
-        func tryPOST(_ label: String, path: String, body: [String: Any]) async throws -> [MintExecResponse.BlindSig] {
-            print("RealMintAPI executeMint try \(label): POST \(path) body keys: \(Array(body.keys))")
-            let r: MintExecResponse = try await postJSON(MintExecResponse.self, path: path, anyBody: body)
-            return r.all
-        }
-
-        // 1) POST /v1/mint/quote/bolt11/{quote} with { outputs: [{amount,B_}] }
-        if let r = try? await tryPOST("A1 B_", path: pathA, body: ["outputs": outputs_B_]) { return r }
-        // 2) Same path, key "B"
-        if let r = try? await tryPOST("A2 B", path: pathA, body: ["outputs": outputs_B]) { return r }
-
-        // 3) Legacy path: /v1/mint/quote/{quote}/bolt11, with B_
-        if let r = try? await tryPOST("B1 B_", path: pathB, body: ["outputs": outputs_B_]) { return r }
-        // 4) Legacy path + key "B"
-        if let r = try? await tryPOST("B2 B", path: pathB, body: ["outputs": outputs_B]) { return r }
-
-        // 5) Body carries the quote id: POST /v1/mint/bolt11 { quote, outputs }
-        if let r = try? await tryPOST("C1 B_", path: pathC, body: ["quote": quoteId, "outputs": outputs_B_]) { return r }
-        if let r = try? await tryPOST("C2 B", path: pathC, body: ["quote": quoteId, "outputs": outputs_B]) { return r }
-
-        // 6) Some servers require keyset id at top level or per output
-        if let keyset = try? await fetchKeyset(), !keyset.keys.isEmpty {
-            let kid = keyset.id
-            // 6a) Path A + top-level id + B_
-            if let r = try? await tryPOST("A3 id+B_", path: pathA, body: ["id": kid, "outputs": outputs_B_]) { return r }
-            // 6b) Path A + top-level id + B
-            if let r = try? await tryPOST("A4 id+B", path: pathA, body: ["id": kid, "outputs": outputs_B]) { return r }
-            // 6c) Path C with quote + top-level id + B_
-            if let r = try? await tryPOST("C3 quote+id+B_", path: pathC, body: ["quote": quoteId, "id": kid, "outputs": outputs_B_]) { return r }
-            // 6d) Path C with quote + top-level id + B
-            if let r = try? await tryPOST("C4 quote+id+B", path: pathC, body: ["quote": quoteId, "id": kid, "outputs": outputs_B]) { return r }
-            // 6e) Per-output id on Path A (B_ then B)
-            let withId_B_ = outputs_B_.map { var m = $0; m["id"] = kid; return m }
-            let withId_B  = outputs_B.map  { var m = $0; m["id"] = kid; return m }
-            if let r = try? await tryPOST("A5 id-per-output B_", path: pathA, body: ["outputs": withId_B_]) { return r }
-            if let r = try? await tryPOST("A6 id-per-output B",  path: pathA, body: ["outputs": withId_B])  { return r }
-            // 6f) Path C + quote + id-per-output (B_ then B)
-            if let r = try? await tryPOST("C5 quote+id-per-output B_", path: pathC, body: ["quote": quoteId, "outputs": withId_B_]) { return r }
-            if let r = try? await tryPOST("C6 quote+id-per-output B",  path: pathC, body: ["quote": quoteId, "outputs": withId_B])  { return r }
-        }
-
-        throw CashuError.network("NUT-04 execute failed for quote \(quoteId) on all endpoint variants")
+        // Cashu.cz requires the keyset id as `id` on each output
+        let keyset = try await fetchKeyset()
+        let kid = keyset.id
+        let path = "/v1/mint/bolt11"
+        let payload: [String: Any] = [
+            "quote": quoteId,
+            "outputs": outputs.map { out in
+                [
+                    "id": kid,              // <-- keyset id, same for all outputs
+                    "amount": out.amount,
+                    "B_": out.B_
+                ]
+            }
+        ]
+        print("RealMintAPI executeMint: POST \(path) {quote, outputs[id(=keyset),B_]} kid=\(kid)")
+        let response: MintExecResponse = try await postJSON(MintExecResponse.self,
+                                                            path: path,
+                                                            anyBody: payload)
+        return response.all
     }
     
 }
@@ -474,12 +436,12 @@ struct RealMintAPI: MintAPI {
 
 private extension Data {
   /// Try hex first, fall back to base64.
-  init?(hexOrBase64: String) {
+  nonisolated init?(hexOrBase64: String) {
     if let d = Data(hex: hexOrBase64) { self = d; return }
     if let d = Data(base64Encoded: hexOrBase64) { self = d; return }
     return nil
   }
-  init?(hex: String) {
+    nonisolated init?(hex: String) {
     let s = hex.hasPrefix("0x") ? String(hex.dropFirst(2)) : hex
     let len = s.count
     guard len % 2 == 0 else { return nil }
@@ -495,5 +457,5 @@ private extension Data {
     }
     self = data
   }
-  var hexString: String { self.map { String(format: "%02x", $0) }.joined() }
+    nonisolated var hexString: String { self.map { String(format: "%02x", $0) }.joined() }
 }
