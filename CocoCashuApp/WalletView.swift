@@ -29,10 +29,26 @@ struct WalletView: View {
       Text("Cashu Demo Wallet")
         .font(.title.bold())
 
-      // Current balance for the demo mint
-        Text("Balance: \(balance(for: activeMint)) sats")
+        // Current balance for the active mint with manual refresh
+        HStack(spacing: 12) {
+          Text("Balance: \(balance(for: activeMint)) sats")
             .font(.headline)
-
+          Button {
+            Task {
+              isPolling = true
+              await wallet.refresh(mint: activeMint)
+              isPolling = false
+            }
+          } label: {
+            if isPolling {
+              ProgressView().controlSize(.small)
+            } else {
+              Text("Refresh")
+            }
+          }
+          .buttonStyle(.bordered)
+        }
+        
       // Proofs list (grouped by mint)
       List {
         ForEach(sortedMints, id: \.self) { mintStr in
@@ -122,6 +138,14 @@ struct WalletView: View {
             try? await wallet.manager.proofService.spend(amount: 50, from: demoMint)
           }
         }
+          
+          Button("Refresh All") {
+            Task {
+              isPolling = true
+              await wallet.refreshAll()
+              isPolling = false
+            }
+          }
           
           Button("Mint 10 sats (real)") {
               print("WalletView: Mint 10 sats (real)")
