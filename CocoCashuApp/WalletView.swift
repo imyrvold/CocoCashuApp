@@ -85,7 +85,7 @@ struct WalletView: View {
                 }
 
               Text("Amount (sats)")
-              TextField("100", text: $withdrawAmount)
+              TextField("2", text: $withdrawAmount)
                 .textFieldStyle(.roundedBorder)
                 .disabled(true)
 #if os(iOS)
@@ -276,8 +276,6 @@ private struct ProofRow: View {
 
 private func parseSatsFromBOLT11(_ bolt11: String) -> Int64? {
   // Expect prefix like lnbc[amount][multiplier]
-  // Examples: lnbc1u… => 1 microBTC = 100 sats; lnbc10u => 1000 sats; lnbc1000n => 0.1 sat (unsupported)
-  // We handle m (milli), u (micro), n (nano), p (pico). Return sats if integral.
   guard let lnRange = bolt11.range(of: "lnbc", options: [.caseInsensitive]) else { return nil }
   let suffix = bolt11[lnRange.upperBound...]
   // Read numeric+unit until non-alnum
@@ -289,16 +287,18 @@ private func parseSatsFromBOLT11(_ bolt11: String) -> Int64? {
     else { break }
   }
   guard let unitChar = unit, let amountVal = Int64(digits), amountVal > 0 else { return nil }
-  // Convert BTC unit to sats
+  // Convert BTC unit to sats; return only if integral
   switch unitChar {
-  case "m": // milliBTC => 0.001 BTC => 100_000 sats per 1
+  case "m": // 1 mBTC = 100_000 sats
     return amountVal * 100_000
-  case "u": // microBTC => 0.000001 BTC => 100 sats per 1
+  case "u": // 1 μBTC = 100 sats
     return amountVal * 100
-  case "n": // nanoBTC => 0.000000001 BTC => 0.1 sat per 1 (not integral)
-    return nil
-  case "p": // picoBTC => 0.000000000001 BTC => 0.0001 sat per 1 (not integral)
-    return nil
+  case "n": // 1 nBTC = 0.1 sat => sats = amount/10 if divisible
+    guard amountVal % 10 == 0 else { return nil }
+    return amountVal / 10
+  case "p": // 1 pBTC = 0.0001 sat => sats = amount/10_000 if divisible
+    guard amountVal % 10_000 == 0 else { return nil }
+    return amountVal / 10_000
   default:
     return nil
   }
