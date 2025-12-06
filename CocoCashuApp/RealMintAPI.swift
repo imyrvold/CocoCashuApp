@@ -50,8 +50,13 @@ struct RealMintAPI: MintAPI {
   struct StatusResponse: Decodable { let paid: Bool }
 
   struct MintTokenResponse: Decodable {
-    struct MintProof: Decodable { let amount: Int64; let secret: String }
-
+      struct MintProof: Decodable {
+          let amount: Int64
+          let secret: String
+          let C: String
+          let id: String? // Keyset ID (usually present)
+      }
+      
     let proofs: [MintProof]
     let rawTokenString: String?
 
@@ -84,8 +89,50 @@ struct RealMintAPI: MintAPI {
     }
   }
 
-  struct MeltResponse: Decodable { let paid: Bool; let preimage: String?; let change: [MintTokenResponse.MintProof]? }
+  struct MeltQuoteResponse: Decodable {
+    let quote: String?
+    let id: String?
+    let quoteId: String?
+    let amount: Int64?
+    let feeReserve: Int64?
 
+    enum CodingKeys: String, CodingKey {
+      case quote
+      case id
+      case quoteId = "quote_id"
+      case amount
+      case feeReserve = "fee_reserve"
+    }
+  }
+
+    struct MeltResponse: Decodable {
+      let paid: Bool
+      let preimage: String?
+      let change: [MintTokenResponse.MintProof]?
+
+      private enum CodingKeys: String, CodingKey {
+        case paid
+        case preimage              // some mints use this
+        case payment_preimage      // cashu v1 uses this
+        case change
+      }
+
+      init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        paid = (try? c.decode(Bool.self, forKey: .paid)) ?? false
+
+        if let p = try? c.decode(String.self, forKey: .preimage) {
+          preimage = p
+        } else if let p = try? c.decode(String.self, forKey: .payment_preimage) {
+          preimage = p
+        } else {
+          preimage = nil
+        }
+
+        change = try? c.decodeIfPresent([MintTokenResponse.MintProof].self, forKey: .change)
+      }
+    }
+    
   // MARK: - MintAPI
 
   func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
@@ -173,12 +220,12 @@ struct RealMintAPI: MintAPI {
         // Typical: POST /v1/mint { invoice }
         do {
           let r: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["invoice": invoice])
-          return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+            return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") }
         } catch {
           // Fallback body key used by some mints
           do {
             let r2: MintTokenResponse = try await postJSON(MintTokenResponse.self, path: "/v1/mint", body: ["payment_request": invoice])
-            return r2.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+              return r2.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") }
           } catch {
             throw error
           }
@@ -193,7 +240,7 @@ struct RealMintAPI: MintAPI {
         let r: MintTokenResponse = try await postJSON(MintTokenResponse.self,
                                                       path: "/v1/mint/quote/bolt11/\(quoteId)",
                                                       anyBody: [:])
-        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+          if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") } }
         if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
       } catch { print("RealMintAPI redeem POST quoteId path failed:", error) }
 
@@ -203,7 +250,7 @@ struct RealMintAPI: MintAPI {
         let r: MintTokenResponse = try await postJSON(MintTokenResponse.self,
                                                       path: "/v1/mint/quote/\(quoteId)/bolt11",
                                                       anyBody: [:])
-        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") } }
         if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
       } catch { print("RealMintAPI redeem POST quoteId/bolt11 failed:", error) }
 
@@ -218,7 +265,7 @@ struct RealMintAPI: MintAPI {
         }
         // Or decode structured proofs if present
         if let r = try? decodeJSON(MintTokenResponse.self, data: data), !r.proofs.isEmpty {
-          return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+          return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") }
         }
       } catch { print("RealMintAPI redeem GET quoteId path failed:", error) }
 
@@ -226,7 +273,7 @@ struct RealMintAPI: MintAPI {
       if let r: MintTokenResponse = try? await postJSON(MintTokenResponse.self,
                                                         path: "/v1/mint",
                                                         body: ["quote": quoteId]) {
-        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") } }
         if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
       }
 
@@ -234,33 +281,126 @@ struct RealMintAPI: MintAPI {
       if let r: MintTokenResponse = try? await postJSON(MintTokenResponse.self,
                                                         path: "/v1/mint",
                                                         body: ["quote_id": quoteId]) {
-        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") } }
         if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
       }
       if let r: MintTokenResponse = try? await postJSON(MintTokenResponse.self,
                                                         path: "/v1/mint",
                                                         body: ["id": quoteId]) {
-        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data()) } }
+        if !r.proofs.isEmpty { return r.proofs.map { Proof(amount: $0.amount, mint: mint, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: $0.C, keysetId: $0.id ?? "") } }
         if let s = r.rawTokenString, let parsed = parseCashuTokenString(s, mintURL: mint) { return parsed }
       }
 
       throw CashuError.network("Could not redeem tokens for quote id \(quoteId)")
     }
 
-  func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
-    // Typical: POST /v1/melt/bolt11 { invoice, proofs }
-    let payload: [String: Any] = [
-      "invoice": destination,
-      "proofs": proofs.map { ["amount": $0.amount, "secret": $0.secret.hexString] }
-    ]
-    let r: MeltResponse = try await postJSON(MeltResponse.self, path: "/v1/melt/bolt11", anyBody: payload)
-    guard r.paid, let pre = r.preimage else { throw CashuError.protocolError("Melt failed or unpaid") }
-    let changeProofs: [Proof]? = r.change?.map { mp in
-      Proof(amount: mp.amount, mint: mint, secret: Data(hexOrBase64: mp.secret) ?? Data())
-    }
-    return (preimage: pre, change: changeProofs)
-  }
+    func melt(
+      mint: MintURL,
+      proofs: [Proof],
+      amount: Int64,
+      destination: String
+    ) async throws -> (preimage: String, change: [Proof]?) {
+      // Preferred NUT-05 flow for v1 mints like cashu.cz:
+      //  1) POST /v1/melt/quote/bolt11 { request: bolt11, unit: "sat" }
+      //  2) POST /v1/melt/bolt11       { quote: id, inputs: [Proof] }
 
+      do {
+        // 1) Ask for a melt quote
+        let quoteBody: [String: Any] = [
+          "request": destination,
+          "unit": "sat"            // << this was missing and caused your 422
+        ]
+
+        let q: MeltQuoteResponse = try await postJSON(
+          MeltQuoteResponse.self,
+          path: "/v1/melt/quote/bolt11",
+          anyBody: quoteBody
+        )
+
+        guard let qid = q.quote ?? q.quoteId ?? q.id else {
+          throw CashuError.protocolError("Melt quote response missing quote id")
+        }
+
+        // 2) Send reserved proofs as inputs
+        let inputs: [[String: Any]] = proofs.map { p in
+          [
+            "id": p.keysetId,        // <--- Required by mint
+            "amount": p.amount,
+            "secret": p.secret.hexString,
+            "C": p.C                 // <--- Required by mint
+          ]
+        }
+          print("DEBUG MELT: Inputs: \(inputs)")
+        let payload: [String: Any] = [
+          "quote": qid,
+          "inputs": inputs
+        ]
+
+        let r: MeltResponse = try await postJSON(
+          MeltResponse.self,
+          path: "/v1/melt/bolt11",
+          anyBody: payload
+        )
+
+        guard r.paid, let pre = r.preimage else {
+          throw CashuError.protocolError("Melt failed or unpaid")
+        }
+
+        let changeProofs: [Proof]? = r.change?.map { mp in
+          Proof(
+            amount: mp.amount,
+            mint: mint,
+            secret: Data(hexOrBase64: mp.secret) ?? Data(),
+            C: mp.C,
+            keysetId: mp.id ?? ""
+          )
+        }
+
+        return (preimage: pre, change: changeProofs)
+      } catch {
+              let errorString = String(describing: error)
+          if errorString.contains("HTTP 400") ||
+                     errorString.contains("already issued") ||
+                     errorString.contains("timed out") {
+                       print("RealMintAPI: Aborting melt due to API error or timeout:", error)
+                       throw error
+                  }
+          print("RealMintAPI melt NUT-05 path failed, falling back to legacy:", error)
+      }
+
+      // --- Legacy fallback for older, non-v1 mints (kept for compatibility) ---
+
+      let legacyPayload: [String: Any] = [
+        "invoice": destination,
+        "proofs": proofs.map { [
+          "amount": $0.amount,
+          "secret": $0.secret.hexString
+        ] }
+      ]
+
+      let r: MeltResponse = try await postJSON(
+        MeltResponse.self,
+        path: "/v1/melt/bolt11",
+        anyBody: legacyPayload
+      )
+
+      guard r.paid, let pre = r.preimage else {
+        throw CashuError.protocolError("Melt failed or unpaid (legacy)")
+      }
+
+      let changeProofs: [Proof]? = r.change?.map { mp in
+        Proof(
+          amount: mp.amount,
+          mint: mint,
+          secret: Data(hexOrBase64: mp.secret) ?? Data(),
+          C: mp.C,
+          keysetId: mp.id ?? ""
+        )
+      }
+
+      return (preimage: pre, change: changeProofs)
+    }
+    
   // MARK: - Networking helpers
 
   private func makeURL(path: String, query: [String: String]? = nil) -> URL {
@@ -274,6 +414,10 @@ struct RealMintAPI: MintAPI {
     var req = URLRequest(url: url)
     req.httpMethod = "GET"
     req.setValue("application/json", forHTTPHeaderField: "Accept")
+      
+      // FIX: Increase timeout to 120s for Lightning payments
+          req.timeoutInterval = 120
+      
     let (data, resp) = try await urlSession.data(for: req)
     try ensureOK(resp, url: url, data: data)
     return try decodeJSON(T.self, data: data)
@@ -289,6 +433,10 @@ struct RealMintAPI: MintAPI {
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
+      
+      // FIX: Increase timeout to 120s for Lightning payments
+          req.timeoutInterval = 120
+      
     req.httpBody = try JSONSerialization.data(withJSONObject: anyBody, options: [])
     let (data, resp) = try await urlSession.data(for: req)
       try ensureOK(resp, url: url, data: data)
@@ -343,7 +491,7 @@ struct RealMintAPI: MintAPI {
             let token: [Entry]
         }
       guard let root = try? JSONDecoder().decode(TokenRoot.self, from: data), let first = root.token.first else { return nil }
-      return first.proofs.map { Proof(amount: $0.amount, mint: mintURL, secret: Data(hexOrBase64: $0.secret) ?? Data()) }
+      return first.proofs.map { Proof(amount: $0.amount, mint: mintURL, secret: Data(hexOrBase64: $0.secret) ?? Data(), C: "", keysetId: "") }
     }
 
     // Models for NUT-04 execution

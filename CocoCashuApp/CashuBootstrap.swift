@@ -10,6 +10,8 @@ enum CashuBootstrap {
     let amount: Int64
     let mint: String
     let secretBase64: String
+    let C: String
+    let keysetId: String
   }
 
   static func makeWallet() async -> ObservableWallet {
@@ -29,7 +31,7 @@ enum CashuBootstrap {
         func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus { .paid }
         
         func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
-          [Proof(amount: 100, mint: mint, secret: Data("secret".utf8))]
+          [Proof(amount: 100, mint: mint, secret: Data("secret".utf8), C: "", keysetId: "")]
         }
         
         func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
@@ -61,7 +63,7 @@ enum CashuBootstrap {
     let proofs: [Proof] = stored.compactMap { item in
       guard let mintURL = URL(string: item.mint),
             let secret = Data(base64Encoded: item.secretBase64) else { return nil }
-      return Proof(amount: item.amount, mint: mintURL, secret: secret)
+        return Proof(amount: item.amount, mint: mintURL, secret: secret, C: item.C, keysetId: item.keysetId)
     }
     guard !proofs.isEmpty else { return }
 

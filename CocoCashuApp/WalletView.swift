@@ -93,7 +93,7 @@ struct WalletView: View {
 #endif
 
               if isWithdrawing { ProgressView().padding(.vertical, 4) }
-              if let err = withdrawError { Text(err).foregroundStyle(.red).font(.footnote) }
+                if let err = withdrawError { Text(err).foregroundStyle(.red).font(.footnote); let _ = print(err) }
 
               HStack {
                 Spacer()
@@ -128,7 +128,7 @@ struct WalletView: View {
           Task {
             // In a real flow you’d create a quote and poll until paid,
             // then call MintService.receiveTokens(for:).
-            let proof = Proof(amount: 100, mint: demoMint, secret: Data())
+            let proof = Proof(amount: 100, mint: demoMint, secret: Data(), C: "", keysetId: "")
             try? await wallet.manager.proofService.addNew([proof])
           }
         }
@@ -147,8 +147,8 @@ struct WalletView: View {
             }
           }
           
-          Button("Mint 10 sats (real)") {
-              print("WalletView: Mint 10 sats (real)")
+          Button("Mint 100 sats (real)") {
+              print("WalletView: Mint 100 sats (real)")
             Task {
                 let mint = activeMint
                 let manager = wallet.manager
@@ -157,29 +157,37 @@ struct WalletView: View {
                   try await RealMintAPI(baseURL: mintURL).fetchKeyset()
                 }
                 let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
-                let (invoice, qid) = try await flow.topUp(mint: mint, amount: 10)
-                await MainActor.run {
-                  self.invoiceItem = InvoiceItem(
-                    invoice: invoice.trimmingCharacters(in: .whitespacesAndNewlines),
-                    quoteId: qid
-                  )
-                  self.paymentStatus = "Waiting for payment…"
-                }
-                await MainActor.run { self.isPolling = true }
-                print("WalletView invoice:", invoice)
-                // Start background polling so user can scan QR and we auto-dismiss on success
-                Task {
-                  do {
-                    try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
-                    paymentStatus = "Paid. Fetching tokens…"
-                    try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid, amount: 10)
-                      paymentStatus = "Tokens received"
-                      isPolling = false
-                      invoiceItem = nil
-                  } catch {
-                    paymentStatus = "Error: \(error)"
-                    isPolling = false
-                  }
+                do {
+                    let (invoice, qid) = try await flow.topUp(mint: mint, amount: 100)
+                    await MainActor.run {
+                        self.invoiceItem = InvoiceItem(
+                            invoice: invoice.trimmingCharacters(in: .whitespacesAndNewlines),
+                            quoteId: qid
+                        )
+                        self.paymentStatus = "Waiting for payment…"
+                    }
+                    await MainActor.run { self.isPolling = true }
+                    print("WalletView invoice:", invoice)
+                    // Start background polling so user can scan QR and we auto-dismiss on success
+                    Task {
+                        do {
+                            try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
+                            paymentStatus = "Paid. Fetching tokens…"
+                            try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid, amount: 100)
+                            paymentStatus = "Tokens received"
+                            isPolling = false
+                            invoiceItem = nil
+                        } catch {
+                            paymentStatus = "Error: \(error)"
+                            isPolling = false
+                        }
+                    }
+                } catch {
+                    // FIX: Print the error if topUp fails
+                    print("❌ Minting failed to get invoice:", error)
+                    await MainActor.run {
+                        self.paymentStatus = "Error starting mint: \(error.localizedDescription)"
+                    }
                 }
             }
           }
@@ -209,7 +217,7 @@ struct WalletView: View {
                     do {
                       try await flow.pollUntilPaid(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId)
                       paymentStatus = "Paid. Fetching tokens…"
-                      try await flow.receiveTokens(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId, amount: 10)
+                      try await flow.receiveTokens(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId, amount: 100)
                       paymentStatus = "Tokens received"
                       isPolling = false
                       invoiceItem = nil

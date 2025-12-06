@@ -33,7 +33,7 @@ struct DemoAPI: MintAPI {
   func checkQuoteStatus(mint: MintURL, invoice: String) async throws -> QuoteStatus { .paid }
 
   func requestTokens(mint: MintURL, for invoice: String) async throws -> [Proof] {
-    [Proof(amount: 1000, mint: mint, secret: Data("secret".utf8))]
+    [Proof(amount: 1000, mint: mint, secret: Data("secret".utf8),C: "", keysetId: "")]
   }
 
   // ⬇️ Update this method to match the protocol
