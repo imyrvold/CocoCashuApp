@@ -108,8 +108,16 @@ struct RealMintAPI: MintAPI {
     struct MeltResponse: Decodable {
       let paid: Bool
       let preimage: String?
-      let change: [MintTokenResponse.MintProof]?
+      let change: [ChangeSig]?
 
+        // Helper struct representing the Mint's change response (NUT-05)
+        struct ChangeSig: Decodable {
+            let amount: Int64
+            let C: String?
+            let C_: String? // Some mints use C, some C_
+            let id: String?
+        }
+        
       private enum CodingKeys: String, CodingKey {
         case paid
         case preimage              // some mints use this
@@ -129,7 +137,16 @@ struct RealMintAPI: MintAPI {
           preimage = nil
         }
 
-        change = try? c.decodeIfPresent([MintTokenResponse.MintProof].self, forKey: .change)
+          if c.contains(.change) {
+              do {
+                  change = try c.decode([ChangeSig].self, forKey: .change)
+              } catch {
+                  print("❌ DECODING ERROR for 'change': \(error)")
+                  change = nil
+              }
+          } else {
+              change = nil
+          }
       }
     }
     
@@ -294,112 +311,50 @@ struct RealMintAPI: MintAPI {
       throw CashuError.network("Could not redeem tokens for quote id \(quoteId)")
     }
 
-    func melt(
-      mint: MintURL,
-      proofs: [Proof],
-      amount: Int64,
-      destination: String
-    ) async throws -> (preimage: String, change: [Proof]?) {
-      // Preferred NUT-05 flow for v1 mints like cashu.cz:
-      //  1) POST /v1/melt/quote/bolt11 { request: bolt11, unit: "sat" }
-      //  2) POST /v1/melt/bolt11       { quote: id, inputs: [Proof] }
-
-      do {
-        // 1) Ask for a melt quote
-        let quoteBody: [String: Any] = [
-          "request": destination,
-          "unit": "sat"            // << this was missing and caused your 422
-        ]
-
-        let q: MeltQuoteResponse = try await postJSON(
-          MeltQuoteResponse.self,
-          path: "/v1/melt/quote/bolt11",
-          anyBody: quoteBody
-        )
-
-        guard let qid = q.quote ?? q.quoteId ?? q.id else {
-          throw CashuError.protocolError("Melt quote response missing quote id")
+    // In RealMintAPI.swift
+        
+        // 1. Get Fee Quote
+        func requestMeltQuote(mint: MintURL, amount: Int64, destination: String) async throws -> (quoteId: String, feeReserve: Int64) {
+            let quoteBody: [String: Any] = ["request": destination, "unit": "sat"]
+            let q: MeltQuoteResponse = try await postJSON(MeltQuoteResponse.self, path: "/v1/melt/quote/bolt11", anyBody: quoteBody)
+            
+            guard let qid = q.quote ?? q.quoteId ?? q.id else {
+                throw CashuError.protocolError("Melt quote missing ID")
+            }
+            return (qid, q.feeReserve ?? 0)
         }
 
-        // 2) Send reserved proofs as inputs
-        let inputs: [[String: Any]] = proofs.map { p in
-          [
-            "id": p.keysetId,        // <--- Required by mint
-            "amount": p.amount,
-            "secret": p.secret.hexString,
-            "C": p.C                 // <--- Required by mint
-          ]
+        // 2. Execute Payment
+        func executeMelt(mint: MintURL, quoteId: String, inputs: [Proof], outputs: [BlindedOutput]) async throws -> (preimage: String, change: [BlindSignatureDTO]?) {
+            let inputDTOs: [[String: Any]] = inputs.map {
+                ["id": $0.keysetId, "amount": $0.amount, "secret": $0.secret.hexString, "C": $0.C]
+            }
+            let outputDTOs: [[String: Any]] = outputs.map {
+                ["id": $0.id, "amount": $0.amount, "B_": $0.B_]
+            }
+            
+            let payload: [String: Any] = [
+                "quote": quoteId,
+                "inputs": inputDTOs,
+                "outputs": outputDTOs
+            ]
+            
+            let r: MeltResponse = try await postJSON(MeltResponse.self, path: "/v1/melt/bolt11", anyBody: payload)
+            
+            guard r.paid, let pre = r.preimage else {
+                throw CashuError.protocolError("Melt not paid")
+            }
+            
+            // Map change output (Blind Signatures)
+            let changeSigs: [BlindSignatureDTO]? = r.change?.map { mp in
+                // For change, mint returns signatures C/C_, not full proofs with secrets
+                BlindSignatureDTO(amount: mp.amount, C_: mp.C_ ?? mp.C, C: mp.C_ ?? mp.C)
+            }
+            
+            return (pre, changeSigs)
         }
-          print("DEBUG MELT: Inputs: \(inputs)")
-        let payload: [String: Any] = [
-          "quote": qid,
-          "inputs": inputs
-        ]
-
-        let r: MeltResponse = try await postJSON(
-          MeltResponse.self,
-          path: "/v1/melt/bolt11",
-          anyBody: payload
-        )
-
-        guard r.paid, let pre = r.preimage else {
-          throw CashuError.protocolError("Melt failed or unpaid")
-        }
-
-        let changeProofs: [Proof]? = r.change?.map { mp in
-          Proof(
-            amount: mp.amount,
-            mint: mint,
-            secret: Data(hexOrBase64: mp.secret) ?? Data(),
-            C: mp.C,
-            keysetId: mp.id ?? ""
-          )
-        }
-
-        return (preimage: pre, change: changeProofs)
-      } catch {
-              let errorString = String(describing: error)
-          if errorString.contains("HTTP 400") ||
-                     errorString.contains("already issued") ||
-                     errorString.contains("timed out") {
-                       print("RealMintAPI: Aborting melt due to API error or timeout:", error)
-                       throw error
-                  }
-          print("RealMintAPI melt NUT-05 path failed, falling back to legacy:", error)
-      }
-
-      // --- Legacy fallback for older, non-v1 mints (kept for compatibility) ---
-
-      let legacyPayload: [String: Any] = [
-        "invoice": destination,
-        "proofs": proofs.map { [
-          "amount": $0.amount,
-          "secret": $0.secret.hexString
-        ] }
-      ]
-
-      let r: MeltResponse = try await postJSON(
-        MeltResponse.self,
-        path: "/v1/melt/bolt11",
-        anyBody: legacyPayload
-      )
-
-      guard r.paid, let pre = r.preimage else {
-        throw CashuError.protocolError("Melt failed or unpaid (legacy)")
-      }
-
-      let changeProofs: [Proof]? = r.change?.map { mp in
-        Proof(
-          amount: mp.amount,
-          mint: mint,
-          secret: Data(hexOrBase64: mp.secret) ?? Data(),
-          C: mp.C,
-          keysetId: mp.id ?? ""
-        )
-      }
-
-      return (preimage: pre, change: changeProofs)
-    }
+        
+        // Remove the old 'melt' function entirely
     
   // MARK: - Networking helpers
 
@@ -440,6 +395,11 @@ struct RealMintAPI: MintAPI {
     req.httpBody = try JSONSerialization.data(withJSONObject: anyBody, options: [])
     let (data, resp) = try await urlSession.data(for: req)
       try ensureOK(resp, url: url, data: data)
+      
+      if let debugStr = String(data: data, encoding: .utf8) {
+              print("🔍 RAW RESPONSE (\(path)): \(debugStr)")
+          }
+      
     return try decodeJSON(T.self, data: data)
   }
 

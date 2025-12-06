@@ -26,6 +26,14 @@ struct ContentView: View {
 }
 
 struct DemoAPI: MintAPI {
+    func requestMeltQuote(mint: CocoCashuCore.MintURL, amount: Int64, destination: String) async throws -> (quoteId: String, feeReserve: Int64) {
+        ("", 0)
+    }
+    
+    func executeMelt(mint: CocoCashuCore.MintURL, quoteId: String, inputs: [CocoCashuCore.Proof], outputs: [CocoCashuCore.BlindedOutput]) async throws -> (preimage: String, change: [CocoCashuCore.BlindSignatureDTO]?) {
+        ("", nil)
+    }
+    
   func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
     ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600), nil)
   }
@@ -42,18 +50,4 @@ struct DemoAPI: MintAPI {
   }
 }
 
-func makeManager() async throws -> CashuManager {
-  let proofs = InMemoryProofRepository()
-  let quotes = InMemoryQuoteRepository()
-  let mints  = InMemoryMintRepository()
-  let counters = InMemoryCounterRepository()
-  let api = DemoAPI()
-  return CashuManager(
-    proofRepo: proofs,
-    mintRepo: mints,
-    quoteRepo: quotes,
-    counterRepo: counters,
-    api: api
-  )
-}
 

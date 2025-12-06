@@ -22,7 +22,15 @@ enum CashuBootstrap {
     let counterRepo = InMemoryCounterRepository()
 
     // Minimal API stub – replace with your real mint API later.
-    struct DemoAPI: MintAPI {
+      struct DemoAPI: MintAPI {
+          func requestMeltQuote(mint: CocoCashuCore.MintURL, amount: Int64, destination: String) async throws -> (quoteId: String, feeReserve: Int64) {
+              ("", 0)
+          }
+          
+          func executeMelt(mint: CocoCashuCore.MintURL, quoteId: String, inputs: [CocoCashuCore.Proof], outputs: [CocoCashuCore.BlindedOutput]) async throws -> (preimage: String, change: [CocoCashuCore.BlindSignatureDTO]?) {
+              ("", nil)
+          }
+          
         func requestMintQuote(mint: MintURL, amount: Int64) async throws -> (invoice: String, expiresAt: Date?, quoteId: String?) {
           ("lnbc1p...fakeinvoice...", Date().addingTimeInterval(600), "demo-quote-id")
         }
@@ -39,13 +47,21 @@ enum CashuBootstrap {
         }
     }
 
-    let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)
+      // In makeWallet()
+      let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)
+      
+      // Create the engine
+      let engine = CocoBlindingEngine { mintURL in
+          try await RealMintAPI(baseURL: mintURL).fetchKeyset()
+      }
+      
     let manager = CashuManager(
       proofRepo: proofRepo,
       mintRepo: mintRepo,
       quoteRepo: quoteRepo,
       counterRepo: counterRepo,
-      api: api //DemoAPI()
+      api: api,
+      blinding: engine
     )
 
     let wallet = ObservableWallet(manager: manager)
