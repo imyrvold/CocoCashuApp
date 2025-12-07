@@ -6,30 +6,37 @@ import CocoCashuCore
 
 struct WalletView: View {
   @Bindable var wallet: ObservableWallet
+    
+    // UI State
     @State private var invoiceItem: InvoiceItem? = nil
     @State private var showWithdraw = false
     @State private var withdrawInvoice = ""
     @State private var withdrawAmount = ""
     @State private var isWithdrawing = false
     @State private var withdrawError: String? = nil
+    
+    // Minting State
+    @State private var showMintSheet = false
+    @State private var mintAmountString = "100"
+    @State private var isRequestingQuote = false
+    @State private var mintError: String? = nil
+
     // Payment tracking state
     @State private var isPolling = false
     @State private var paymentStatus: String? = nil
     
   private let demoMint = URL(string: "https://mint.test")!
-    let activeMint = URL(string: "https://cashu.cz")! // or mint.coinos.io, etc.
+    let activeMint = URL(string: "https://cashu.cz")!
 
   var body: some View {
-    // Precompute values to help the type-checker
-    let mintKey = demoMint.absoluteString
-    let currentBalance: Int64 = balance(for: demoMint)
+    // Precompute values
     let sortedMints: [String] = Array(wallet.proofsByMint.keys).sorted()
 
     return VStack(spacing: 16) {
-      Text("Cashu Demo Wallet")
+      Text("Cashu Wallet")
         .font(.title.bold())
 
-        // Current balance for the active mint with manual refresh
+        // Current balance for the active mint
         HStack(spacing: 12) {
           Text("Balance: \(balance(for: activeMint)) sats")
             .font(.headline)
@@ -43,7 +50,7 @@ struct WalletView: View {
             if isPolling {
               ProgressView().controlSize(.small)
             } else {
-              Text("Refresh")
+              Image(systemName: "arrow.clockwise")
             }
           }
           .buttonStyle(.bordered)
@@ -62,210 +69,241 @@ struct WalletView: View {
       }
       .frame(minHeight: 240)
 
-      HStack {
-          Button("Withdraw (melt)…") {
+      HStack(spacing: 20) {
+          // MARK: - Mint Button
+          Button("Mint…") {
+              showMintSheet = true
+          }
+          .sheet(isPresented: $showMintSheet) {
+              mintInputSheet
+          }
+          
+          // MARK: - Withdraw Button
+          Button("Withdraw…") {
             showWithdraw = true
           }
           .sheet(isPresented: $showWithdraw) {
-            VStack(alignment: .leading, spacing: 12) {
-              Text("Withdraw to Lightning").font(.headline)
-              Text("Paste a BOLT11 invoice and enter an amount in sats.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-              Text("Invoice (BOLT11)")
-              TextField("lnbc1…", text: $withdrawInvoice)
-                .textFieldStyle(.roundedBorder)
-                .font(.footnote)
-                .textSelection(.enabled)
-                .onChange(of: withdrawInvoice) {
-                  if let sats = parseSatsFromBOLT11(withdrawInvoice) {
-                    withdrawAmount = String(sats)
-                  }
-                }
-
-              Text("Amount (sats)")
-              TextField("2", text: $withdrawAmount)
-                .textFieldStyle(.roundedBorder)
-                .disabled(true)
-#if os(iOS)
-                .keyboardType(.numberPad)
-#endif
-
-              if isWithdrawing { ProgressView().padding(.vertical, 4) }
-                if let err = withdrawError { Text(err).foregroundStyle(.red).font(.footnote); let _ = print(err) }
-
-              HStack {
-                Spacer()
-                Button("Cancel") { showWithdraw = false }
-                Button("Withdraw") {
-                  Task {
-                    withdrawError = nil
-                    guard let amt = parseSatsFromBOLT11(withdrawInvoice) else { withdrawError = "Could not parse amount from invoice"; return }
-                    let dest = withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !dest.isEmpty else { withdrawError = "Invoice is empty"; return }
-                    isWithdrawing = true
-                    do {
-                      try await wallet.manager.mintService.spend(amount: amt, from: activeMint, to: dest)
-                      isWithdrawing = false
-                      showWithdraw = false
-                      withdrawInvoice = ""; withdrawAmount = ""; withdrawError = nil
-                    } catch {
-                      isWithdrawing = false
-                      withdrawError = String(describing: error)
-                    }
-                  }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-              }
-            }
-            .padding()
-            .frame(minWidth: 360)
-          }
-          
-        Button("Mint 100 sats") {
-          Task {
-            // In a real flow you’d create a quote and poll until paid,
-            // then call MintService.receiveTokens(for:).
-            let proof = Proof(amount: 100, mint: demoMint, secret: Data(), C: "", keysetId: "")
-            try? await wallet.manager.proofService.addNew([proof])
-          }
-        }
-
-        Button("Spend 50 sats") {
-          Task {
-            try? await wallet.manager.proofService.spend(amount: 50, from: demoMint)
-          }
-        }
-          
-          Button("Refresh All") {
-            Task {
-              isPolling = true
-              await wallet.refreshAll()
-              isPolling = false
-            }
-          }
-          
-          Button("Mint 100 sats (real)") {
-              print("WalletView: Mint 100 sats (real)")
-            Task {
-                let mint = activeMint
-                let manager = wallet.manager
-                let api = RealMintAPI(baseURL: mint)
-                let engine = CocoBlindingEngine { mintURL in
-                  try await RealMintAPI(baseURL: mintURL).fetchKeyset()
-                }
-                let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
-                do {
-                    let (invoice, qid) = try await flow.topUp(mint: mint, amount: 100)
-                    await MainActor.run {
-                        self.invoiceItem = InvoiceItem(
-                            invoice: invoice.trimmingCharacters(in: .whitespacesAndNewlines),
-                            quoteId: qid
-                        )
-                        self.paymentStatus = "Waiting for payment…"
-                    }
-                    await MainActor.run { self.isPolling = true }
-                    print("WalletView invoice:", invoice)
-                    // Start background polling so user can scan QR and we auto-dismiss on success
-                    Task {
-                        do {
-                            try await flow.pollUntilPaid(mint: mint, invoice: invoice, quoteId: qid)
-                            paymentStatus = "Paid. Fetching tokens…"
-                            try await flow.receiveTokens(mint: mint, invoice: invoice, quoteId: qid, amount: 100)
-                            paymentStatus = "Tokens received"
-                            isPolling = false
-                            invoiceItem = nil
-                        } catch {
-                            paymentStatus = "Error: \(error)"
-                            isPolling = false
-                        }
-                    }
-                } catch {
-                    // FIX: Print the error if topUp fails
-                    print("❌ Minting failed to get invoice:", error)
-                    await MainActor.run {
-                        self.paymentStatus = "Error starting mint: \(error.localizedDescription)"
-                    }
-                }
-            }
-          }
-          .sheet(item: $invoiceItem) { item in
-            VStack(spacing: 16) {
-              InvoiceSheet(invoice: item.invoice)
-
-              if let status = paymentStatus {
-                  let _ = print("WalletView paymentStatus:", status)
-                Text(status)
-                  .font(.footnote)
-                  .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)
-              }
-
-              HStack {
-                if isPolling { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("I’ve paid – Refresh") {
-                  let manager = wallet.manager
-                    let api = RealMintAPI(baseURL: activeMint)
-                    let engine = CocoBlindingEngine { mintURL in
-                      try await RealMintAPI(baseURL: mintURL).fetchKeyset()
-                    }
-                    let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
-                    isPolling = true
-                  Task {
-                    do {
-                      try await flow.pollUntilPaid(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId)
-                      paymentStatus = "Paid. Fetching tokens…"
-                      try await flow.receiveTokens(mint: activeMint, invoice: item.invoice, quoteId: item.quoteId, amount: 100)
-                      paymentStatus = "Tokens received"
-                      isPolling = false
-                      invoiceItem = nil
-                    } catch {
-                      paymentStatus = "Error: \(error)"
-                      isPolling = false
-                    }
-                  }
-                }
-              }
-              .padding(.horizontal)
-            }
-            .padding()
-            .frame(minWidth: 360)
-          }
-          
-          Button("Pay LN invoice") {
-            Task {
-              let destination = "lnbc1p...YOURINVOICE..."
-              let mint = demoMint
-              // Choose an amount (parse from invoice ideally)
-              try await wallet.manager.mintService.spend(amount: 50, from: mint, to: destination)
-              // If your melt returns change proofs, call proofService.addNew(changeProofs)
-              // In our demo, melt returns only a preimage; you can follow with markSpent if needed.
-            }
+              withdrawSheet
           }
       }
       .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+        
+        // This sheet displays the QR code once the quote is ready
+        .sheet(item: $invoiceItem) { item in
+            paymentSheet(for: item)
+        }
     }
     .padding()
   }
+
+  // MARK: - Helper Views
+    
+  private var mintInputSheet: some View {
+      VStack(spacing: 20) {
+          Text("Mint Tokens").font(.headline)
+          Text("Enter the amount you want to receive.")
+              .foregroundStyle(.secondary)
+          
+          TextField("Amount", text: $mintAmountString)
+              #if os(iOS)
+              .keyboardType(.numberPad)
+              #endif
+              .textFieldStyle(.roundedBorder)
+              .multilineTextAlignment(.center)
+              .frame(maxWidth: 150)
+          
+          if let err = mintError {
+              Text(err).foregroundStyle(.red).font(.caption)
+          }
+          
+          if isRequestingQuote {
+              ProgressView("Requesting Invoice…")
+          } else {
+              HStack {
+                  Button("Cancel") { showMintSheet = false }
+                      .buttonStyle(.bordered)
+                  Button("Get Invoice") {
+                      startMintingProcess()
+                  }
+                  .buttonStyle(.borderedProminent)
+                  .disabled(Int64(mintAmountString) == nil)
+              }
+          }
+      }
+      .padding()
+      .frame(minWidth: 300, minHeight: 200)
+      .presentationDetents([.height(250)])
+  }
+    
+  private var withdrawSheet: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Withdraw to Lightning").font(.headline)
+        Text("Paste a BOLT11 invoice and enter an amount in sats.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+
+        Text("Invoice (BOLT11)")
+        TextField("lnbc1…", text: $withdrawInvoice)
+          .textFieldStyle(.roundedBorder)
+          .font(.footnote)
+          .onChange(of: withdrawInvoice) {
+            if let sats = parseSatsFromBOLT11(withdrawInvoice) {
+              withdrawAmount = String(sats)
+            }
+          }
+
+        Text("Amount (sats)")
+        TextField("0", text: $withdrawAmount)
+          .textFieldStyle(.roundedBorder)
+          .disabled(true)
+
+        if isWithdrawing { ProgressView().padding(.vertical, 4) }
+        if let err = withdrawError { Text(err).foregroundStyle(.red).font(.footnote) }
+
+        HStack {
+          Spacer()
+          Button("Cancel") { showWithdraw = false }
+          Button("Withdraw") {
+            performWithdraw()
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+      }
+      .padding()
+      .frame(minWidth: 360)
+  }
+    
+  private func paymentSheet(for item: InvoiceItem) -> some View {
+      VStack(spacing: 16) {
+        InvoiceSheet(invoice: item.invoice)
+
+        if let status = paymentStatus {
+          Text(status)
+            .font(.footnote)
+            .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)
+        }
+
+        HStack {
+          if isPolling { ProgressView().controlSize(.small) }
+          Spacer()
+          Button("I’ve paid – Refresh") {
+              pollForPayment(item: item)
+          }
+        }
+        .padding(.horizontal)
+      }
+      .padding()
+      .frame(minWidth: 360)
+  }
+
+  // MARK: - Actions
+
+  private func startMintingProcess() {
+      guard let amount = Int64(mintAmountString), amount > 0 else { return }
+      isRequestingQuote = true
+      mintError = nil
+      
+      Task {
+          let mint = activeMint
+          let manager = wallet.manager
+          let api = RealMintAPI(baseURL: mint)
+          let engine = CocoBlindingEngine { mintURL in
+            try await RealMintAPI(baseURL: mintURL).fetchKeyset()
+          }
+          let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
+          
+          do {
+              let (invoice, qid) = try await flow.topUp(mint: mint, amount: amount)
+              
+              await MainActor.run {
+                  self.isRequestingQuote = false
+                  self.showMintSheet = false // Close input sheet
+                  
+                  // Open Payment QR Sheet
+                  self.invoiceItem = InvoiceItem(
+                    invoice: invoice.trimmingCharacters(in: .whitespacesAndNewlines),
+                    quoteId: qid
+                  )
+                  self.paymentStatus = "Waiting for payment…"
+              }
+              
+              // Start polling automatically
+              pollForPayment(item: InvoiceItem(invoice: invoice, quoteId: qid), flow: flow, amount: amount)
+              
+          } catch {
+              await MainActor.run {
+                  self.isRequestingQuote = false
+                  self.mintError = error.localizedDescription
+              }
+          }
+      }
+  }
+    
+    private func pollForPayment(item: InvoiceItem, flow: MintCoordinator? = nil, amount: Int64 = 0) {
+        self.isPolling = true
+        // Re-create flow if missing (e.g. manual refresh button click)
+        let mint = activeMint
+        let activeFlow: MintCoordinator
+        if let existing = flow {
+            activeFlow = existing
+        } else {
+            let manager = wallet.manager
+            let api = RealMintAPI(baseURL: mint)
+            let engine = CocoBlindingEngine { u in try await RealMintAPI(baseURL: u).fetchKeyset() }
+            activeFlow = MintCoordinator(manager: manager, api: api, blinding: engine)
+        }
+        
+        // We need to know the amount to receive tokens.
+        // In a real app, you'd store the pending Quote in DB with its amount.
+        // Here, we rely on the closure capture or assume the user didn't change the input.
+        let amountToMint = (amount > 0) ? amount : (Int64(mintAmountString) ?? 0)
+
+        Task {
+            do {
+                try await activeFlow.pollUntilPaid(mint: mint, invoice: item.invoice, quoteId: item.quoteId)
+                await MainActor.run { paymentStatus = "Paid. Fetching tokens…" }
+                
+                try await activeFlow.receiveTokens(mint: mint, invoice: item.invoice, quoteId: item.quoteId, amount: amountToMint)
+                
+                await MainActor.run {
+                    paymentStatus = "Tokens received!"
+                    isPolling = false
+                    invoiceItem = nil // Close sheet on success
+                }
+            } catch {
+                await MainActor.run {
+                    paymentStatus = "Error: \(error.localizedDescription)"
+                    isPolling = false
+                }
+            }
+        }
+    }
+    
+    private func performWithdraw() {
+        Task {
+          withdrawError = nil
+          guard let amt = parseSatsFromBOLT11(withdrawInvoice) else { withdrawError = "Could not parse amount"; return }
+          let dest = withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines)
+          guard !dest.isEmpty else { withdrawError = "Invoice is empty"; return }
+          isWithdrawing = true
+          do {
+            try await wallet.manager.mintService.spend(amount: amt, from: activeMint, to: dest)
+            isWithdrawing = false
+            showWithdraw = false
+            withdrawInvoice = ""; withdrawAmount = ""; withdrawError = nil
+          } catch {
+            isWithdrawing = false
+            withdrawError = String(describing: error)
+          }
+        }
+    }
 
   private func balance(for mint: URL) -> Int64 {
     let proofs = wallet.proofsByMint[mint.absoluteString] ?? []
     return proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
   }
-    
-    // 1) Ask mint for invoice
-    func startTopUp(_ sats: Int64) {
-      Task {
-        let mintURL = demoMint
-        // create quote: get invoice + optional quoteId stored in QuoteService (if you wire that)
-        // or call API directly and store a local Quote:
-        let api = (wallet.manager as AnyObject) // just to hint location; you can hold api in manager or expose via method
-        // For a quick start, call the API directly if you’ve kept a reference,
-        // otherwise add a small MintCoordinator that uses wallet.manager.quoteService + mintService
-      }
-    }
 }
 
 private struct ProofRow: View {
@@ -274,9 +312,13 @@ private struct ProofRow: View {
   var body: some View {
     HStack {
       Text("\(proof.amount) sats")
+        .monospacedDigit()
       Spacer()
-      Text(proof.state.rawValue)
-        .foregroundStyle(proof.state == .unspent ? Color.secondary : Color.orange)
+        if proof.state != .unspent {
+            Text(proof.state.rawValue)
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
     }
   }
 }
@@ -295,20 +337,12 @@ private func parseSatsFromBOLT11(_ bolt11: String) -> Int64? {
     else { break }
   }
   guard let unitChar = unit, let amountVal = Int64(digits), amountVal > 0 else { return nil }
-  // Convert BTC unit to sats; return only if integral
   switch unitChar {
-  case "m": // 1 mBTC = 100_000 sats
-    return amountVal * 100_000
-  case "u": // 1 μBTC = 100 sats
-    return amountVal * 100
-  case "n": // 1 nBTC = 0.1 sat => sats = amount/10 if divisible
-    guard amountVal % 10 == 0 else { return nil }
-    return amountVal / 10
-  case "p": // 1 pBTC = 0.0001 sat => sats = amount/10_000 if divisible
-    guard amountVal % 10_000 == 0 else { return nil }
-    return amountVal / 10_000
-  default:
-    return nil
+  case "m": return amountVal * 100_000
+  case "u": return amountVal * 100
+  case "n": guard amountVal % 10 == 0 else { return nil }; return amountVal / 10
+  case "p": guard amountVal % 10_000 == 0 else { return nil }; return amountVal / 10_000
+  default: return nil
   }
 }
 
