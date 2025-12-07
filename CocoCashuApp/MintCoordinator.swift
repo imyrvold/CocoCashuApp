@@ -62,7 +62,12 @@ final class MintCoordinator {
       // 5) Store proofs and notify listeners
       try await manager.proofService.addNew(proofs)
       manager.events.emit(.proofsUpdated(mint: mint))
-//      manager.events.emit(.quoteExecuted(quoteId))
+        await manager.history.add(CashuTransaction(
+            type: .mint,
+            amount: amount,
+            memo: "Minted via Lightning (NUT-04)",
+            status: .success
+        ))
     }
 
     func receiveTokens(mint: URL, invoice: String?, quoteId: String?, amount: Int64?) async throws {
@@ -78,6 +83,14 @@ final class MintCoordinator {
         }
         try await manager.proofService.addNew(proofs)
         manager.events.emit(.proofsUpdated(mint: mint))
+          
+          let total = proofs.map(\.amount).reduce(0, +)
+          await manager.history.add(CashuTransaction(
+            type: .mint,
+            amount: total,
+            memo: "Minted via Lightning",
+            status: .success
+          ))
         return
       } catch {
           // If redemption by quote/invoice failed, fall back to proper NUT-04 execution
