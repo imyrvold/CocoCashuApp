@@ -537,6 +537,37 @@ struct RealMintAPI: MintAPI {
         return response.all
     }
     
+    func swap(mint: MintURL, inputs: [Proof], outputs: [BlindedOutput]) async throws -> [BlindSignatureDTO] {
+        let inputDTOs: [[String: Any]] = inputs.map {
+            ["id": $0.keysetId, "amount": $0.amount, "secret": $0.secret.hexString, "C": $0.C]
+        }
+        
+        let outputDTOs: [[String: Any]] = outputs.map {
+            ["id": $0.id, "amount": $0.amount, "B_": $0.B_]
+        }
+        
+        let payload: [String: Any] = [
+            "inputs": inputDTOs,
+            "outputs": outputDTOs
+        ]
+        
+        struct SwapResponse: Decodable {
+            let signatures: [BlindSignatureDTO]?
+            let promises: [BlindSignatureDTO]?
+            
+            var all: [BlindSignatureDTO] { signatures ?? promises ?? [] }
+        }
+        
+        // 4. Call /v1/split
+        let r: SwapResponse = try await postJSON(SwapResponse.self, path: "/v1/swap", anyBody: payload)
+        
+        // 5. Check results
+        if r.all.isEmpty {
+            throw CashuError.protocolError("Swap returned no signatures")
+        }
+        
+        return r.all
+    }
 }
 
 

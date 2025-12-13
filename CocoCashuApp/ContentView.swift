@@ -48,6 +48,9 @@ struct DemoAPI: MintAPI {
   func melt(mint: MintURL, proofs: [Proof], amount: Int64, destination: String) async throws -> (preimage: String, change: [Proof]?) {
     return (String(repeating: "00", count: 32), nil)
   }
+    
+    // dummy
+    func swap(mint: MintURL, inputs: [Proof], outputs: [BlindedOutput]) async throws -> [BlindSignatureDTO] { [] }
 }
 
 

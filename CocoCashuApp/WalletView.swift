@@ -27,6 +27,14 @@ struct WalletView: View {
     
     private let activeMint = URL(string: "https://cashu.cz")!
     
+    // Ecash State
+    @State private var showSendSheet = false
+    @State private var showReceiveSheet = false
+    @State private var tokenToShare: String? = nil
+    @State private var tokenInput = ""
+    @State private var ecashError: String? = nil
+    @State private var isProcessingEcash = false
+    
     var body: some View {
         VStack(spacing: 24) {
             
@@ -61,10 +69,20 @@ struct WalletView: View {
                 }
                 .sheet(isPresented: $showMintSheet) { mintInputSheet }
                 
-                ActionButton(icon: "arrow.up.right", label: "Send", color: .orange) {
-                    showWithdraw = true
+//                ActionButton(icon: "arrow.up.right", label: "Send", color: .orange) {
+//                    showWithdraw = true
+//                }
+//                .sheet(isPresented: $showWithdraw) { withdrawSheet }
+                
+                ActionButton(icon: "paperplane", label: "Send", color: .orange) {
+                    showSendSheet = true // Re-use or make new sheet
                 }
-                .sheet(isPresented: $showWithdraw) { withdrawSheet }
+                .sheet(isPresented: $showSendSheet) { sendEcashSheet }
+                
+                ActionButton(icon: "arrow.down.doc", label: "Receive", color: .green) {
+                    showReceiveSheet = true
+                }
+                .sheet(isPresented: $showReceiveSheet) { receiveEcashSheet }
             }
             .padding(.horizontal)
             
@@ -294,6 +312,133 @@ struct WalletView: View {
     private func balance(for mint: URL) -> Int64 {
         let proofs = wallet.proofsByMint[mint.absoluteString] ?? []
         return proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
+    }
+    
+    private var sendEcashSheet: some View {
+        VStack(spacing: 20) {
+            Text("Send Ecash").font(.headline)
+            
+            if let token = tokenToShare {
+                // Result State
+                Image(systemName: "checkmark.circle.fill").font(.largeTitle).foregroundStyle(.green)
+                Text("Token Created!").font(.headline)
+                
+                Text(token)
+                    .font(.caption2)
+                    .monospaced()
+                    .lineLimit(3)
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                
+                Button("Copy to Clipboard") {
+#if os(macOS)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(token, forType: .string)
+#else
+                    UIPasteboard.general.string = token
+#endif
+                }
+                .buttonStyle(.borderedProminent)
+                
+                Button("Done") {
+                    tokenToShare = nil
+                    showSendSheet = false
+                }
+            } else {
+                // Input State
+                Text("Enter amount to convert to token.")
+                    .foregroundStyle(.secondary)
+                
+                TextField("Amount", text: $mintAmountString) // reusing state var for simplicity
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 150)
+                
+                if isProcessingEcash { ProgressView() }
+                if let err = ecashError {
+                    let _ = print("Ecash Error: \(err)")
+                    Text(err).foregroundStyle(.red).font(.caption)
+                }
+                
+                Button("Create Token") {
+                    createToken()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isProcessingEcash)
+            }
+        }
+        .padding()
+        .frame(minWidth: 300, minHeight: 300)
+    }
+    
+    private var receiveEcashSheet: some View {
+        VStack(spacing: 20) {
+            Text("Receive Ecash").font(.headline)
+            Text("Paste a Cashu token (cashuA...)")
+                .foregroundStyle(.secondary)
+            
+            TextEditor(text: $tokenInput)
+                .frame(height: 100)
+                .border(Color.gray.opacity(0.2))
+                .padding(.horizontal)
+            
+            if isProcessingEcash { ProgressView() }
+            if let err = ecashError {
+                let _ = print("Ecash Error: \(err)")
+                Text(err).foregroundStyle(.red).font(.caption)
+            }
+            
+            Button("Claim Token") {
+                claimToken()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(tokenInput.isEmpty || isProcessingEcash)
+        }
+        .padding()
+        .frame(minWidth: 300, minHeight: 300)
+    }
+    
+    private func createToken() {
+        guard let amt = Int64(mintAmountString), amt > 0 else { return }
+        isProcessingEcash = true
+        ecashError = nil
+        Task {
+            do {
+                let token = try await wallet.manager.mintService.createToken(amount: amt, from: activeMint)
+                await MainActor.run {
+                    self.tokenToShare = token
+                    self.isProcessingEcash = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.ecashError = error.localizedDescription
+                    self.isProcessingEcash = false
+                }
+            }
+        }
+    }
+    
+    private func claimToken() {
+        let cleanToken = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanToken.isEmpty else { return }
+        isProcessingEcash = true
+        ecashError = nil
+        Task {
+            do {
+                let amt = try await wallet.manager.mintService.receiveToken(cleanToken)
+                await MainActor.run {
+                    self.isProcessingEcash = false
+                    self.showReceiveSheet = false
+                    self.tokenInput = ""
+                    // Optional: Show success alert "Received \(amt) sats"
+                }
+            } catch {
+                await MainActor.run {
+                    self.ecashError = error.localizedDescription
+                    self.isProcessingEcash = false
+                }
+            }
+        }
     }
 }
 
