@@ -3,7 +3,7 @@
 A native, cross-platform Cashu wallet for iOS and macOS, built specifically for the Swift ecosystem. CocoCashu demonstrates how to build a self-custodial ecash wallet using the [CocoCashuSwift](https://github.com/imyrvold/CocoCashuSwift) library.
 
 <p align="center">
-  <img src="https://via.placeholder.com/150" alt="CocoCashu Icon" width="120" height="120">
+  <img src="icon.png" alt="CocoCashu Icon" width="120" height="120">
 </p>
 
 ## ## Features
