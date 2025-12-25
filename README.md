@@ -1,6 +1,6 @@
 # CocoCashu 🥥
 
-A native, cross-platform Cashu wallet for iOS and macOS, built specifically for the Swift ecosystem. CocoCashu demonstrates how to build a self-custodial ecash wallet using the [CocoCashuSwift](https://github.com/yourusername/CocoCashuSwift) library.
+A native, cross-platform Cashu wallet for iOS and macOS, built specifically for the Swift ecosystem. CocoCashu demonstrates how to build a self-custodial ecash wallet using the [CocoCashuSwift](https://github.com/imyrvold/CocoCashuSwift) library.
 
 <p align="center">
   <img src="https://via.placeholder.com/150" alt="CocoCashu Icon" width="120" height="120">
@@ -26,7 +26,7 @@ A native, cross-platform Cashu wallet for iOS and macOS, built specifically for 
 
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/yourusername/CocoCashuApp.git](https://github.com/yourusername/CocoCashuApp.git)
+   git clone [https://github.com/imyrvold/CocoCashuApp.git](https://github.com/imyrvold/CocoCashuApp.git)
    ```
 2. Open `CocoCashuApp.xcodeproj` in Xcode.
 3. Ensure the `CocoCashuSwift` package dependencies are resolved (File > Packages > Resolve Package Versions).
