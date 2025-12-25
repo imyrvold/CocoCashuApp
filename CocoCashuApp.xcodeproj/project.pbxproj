@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F617F7822EFD3D27000B350E /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = F617F7812EFD3D27000B350E /* README.md */; };
 		F687B9942EA3EF18009B1492 /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9932EA3EF18009B1492 /* CocoCashuCore */; };
 		F687B9962EA3EF18009B1492 /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9952EA3EF18009B1492 /* CocoCashuUI */; };
 /* End PBXBuildFile section */
@@ -29,6 +30,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F617F7812EFD3D27000B350E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		F687B9682EA3EE83009B1492 /* CocoCashuApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CocoCashuApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F687B9752EA3EE84009B1492 /* CocoCashuAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CocoCashuAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F687B97F2EA3EE84009B1492 /* CocoCashuAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CocoCashuAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -82,6 +84,7 @@
 		F687B95F2EA3EE83009B1492 = {
 			isa = PBXGroup;
 			children = (
+				F617F7812EFD3D27000B350E /* README.md */,
 				F687B96A2EA3EE83009B1492 /* CocoCashuApp */,
 				F687B9782EA3EE84009B1492 /* CocoCashuAppTests */,
 				F687B9822EA3EE84009B1492 /* CocoCashuAppUITests */,
@@ -224,6 +227,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F617F7822EFD3D27000B350E /* README.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
