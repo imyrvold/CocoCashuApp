@@ -373,6 +373,9 @@ struct WalletView: View {
         }
         .padding()
         .frame(minWidth: 300, minHeight: 300)
+        #if os(iOS)
+        .presentationDetents([.height(250)])
+        #endif
     }
     
     private var receiveEcashSheet: some View {
@@ -400,6 +403,9 @@ struct WalletView: View {
         }
         .padding()
         .frame(minWidth: 300, minHeight: 300)
+        #if os(iOS)
+        .presentationDetents([.height(250)])
+        #endif
     }
     
     private func createToken() {
@@ -428,19 +434,10 @@ struct WalletView: View {
         isProcessingEcash = true
         ecashError = nil
         Task {
-            do {
-                let amt = try await wallet.manager.mintService.receiveToken(cleanToken)
-                await MainActor.run {
-                    self.isProcessingEcash = false
-                    self.showReceiveSheet = false
-                    self.tokenInput = ""
-                    // Optional: Show success alert "Received \(amt) sats"
-                }
-            } catch {
-                await MainActor.run {
-                    self.ecashError = error.localizedDescription
-                    self.isProcessingEcash = false
-                }
+            await MainActor.run {
+                self.isProcessingEcash = false
+                self.showReceiveSheet = false
+                self.tokenInput = ""
             }
         }
     }

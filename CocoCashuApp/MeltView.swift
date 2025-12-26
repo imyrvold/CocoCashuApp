@@ -103,6 +103,10 @@ struct MeltView: View {
             #if os(macOS)
             .frame(minWidth: 400, minHeight: 400)
             #endif
+            #if os(iOS)
+            .presentationDetents([.height(400)])
+            #endif
+
             .padding(.horizontal)
         }
     }
