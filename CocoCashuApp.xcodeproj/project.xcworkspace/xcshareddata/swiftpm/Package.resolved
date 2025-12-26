@@ -1,24 +1,6 @@
 {
-  "originHash" : "136c838d6acdd10d9219905f9e015c5fe16b6dd3e80e9d8ea5f693c094772184",
+  "originHash" : "4c9b504a5522c712b53b7d1f6ba7fa1135797ddb9832c8888137bda3cf121055",
   "pins" : [
-    {
-      "identity" : "cococashuswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/imyrvold/CocoCashuSwift",
-      "state" : {
-        "branch" : "main",
-        "revision" : "edfc55122df933c6e60b479cfe3a7b55a50ebe2d"
-      }
-    },
-    {
-      "identity" : "grdb.swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/groue/GRDB.swift.git",
-      "state" : {
-        "revision" : "2cf6c756e1e5ef6901ebae16576a7e4e4b834622",
-        "version" : "6.29.3"
-      }
-    },
     {
       "identity" : "secp256k1.swift",
       "kind" : "remoteSourceControl",
