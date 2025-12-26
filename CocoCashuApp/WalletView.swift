@@ -69,11 +69,6 @@ struct WalletView: View {
                 }
                 .sheet(isPresented: $showMintSheet) { mintInputSheet }
                 
-//                ActionButton(icon: "arrow.up.right", label: "Send", color: .orange) {
-//                    showWithdraw = true
-//                }
-//                .sheet(isPresented: $showWithdraw) { withdrawSheet }
-                
                 ActionButton(icon: "paperplane", label: "Send", color: .orange) {
                     showSendSheet = true // Re-use or make new sheet
                 }
