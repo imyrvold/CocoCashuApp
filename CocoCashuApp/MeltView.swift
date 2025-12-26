@@ -23,6 +23,7 @@ struct MeltView: View {
     @State private var statusMessage: String = ""
     @State private var isProcessing = false
     @State private var amountToPay: Int64? = nil
+    @State private var showingScanner = false
     
     var body: some View {
         NavigationStack {
@@ -41,10 +42,21 @@ struct MeltView: View {
                             }
                         }
                     
-                    Button("Paste from Clipboard") {
-                        pasteFromClipboard()
+                    HStack {
+                        Button("Paste") { pasteFromClipboard() }
+                            .buttonStyle(.borderless)
+                        
+                        Spacer()
+                        
+                        #if os(iOS)
+                        Button {
+                            showingScanner = true
+                        } label: {
+                            Label("Scan QR", systemImage: "qrcode.viewfinder")
+                        }
+                        .buttonStyle(.borderless)
+                        #endif
                     }
-                    .buttonStyle(.borderless) // Looks better on macOS
                 }
                 
                 if let amt = amountToPay {
@@ -80,6 +92,13 @@ struct MeltView: View {
                     Button("Close") { dismiss() }
                 }
             }
+            #if os(iOS)
+            .sheet(isPresented: $showingScanner) {
+                QRScannerView(isPresenting: $showingScanner) { code in
+                    self.invoice = code // This triggers the onChange logic automatically!
+                }
+            }
+            #endif
             // Form size on macOS
             #if os(macOS)
             .frame(minWidth: 400, minHeight: 400)
