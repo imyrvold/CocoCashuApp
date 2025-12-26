@@ -35,6 +35,8 @@ struct WalletView: View {
     @State private var ecashError: String? = nil
     @State private var isProcessingEcash = false
     
+    @State private var showingMelt = false
+    
     var body: some View {
         VStack(spacing: 24) {
             
@@ -78,6 +80,13 @@ struct WalletView: View {
                     showReceiveSheet = true
                 }
                 .sheet(isPresented: $showReceiveSheet) { receiveEcashSheet }
+                
+                ActionButton(icon: "bolt.fill", label: "Pay", color: .purple) {
+                    showingMelt = true
+                }
+                .sheet(isPresented: $showingMelt) {
+                    MeltView(wallet: wallet)
+                }
             }
             .padding(.horizontal)
             
