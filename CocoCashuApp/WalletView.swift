@@ -37,7 +37,7 @@ struct WalletView: View {
     
     @State private var showingMelt = false
     @State private var showBackup = false
-
+    
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -244,10 +244,13 @@ struct WalletView: View {
         Task {
             let mint = activeMint
             let manager = wallet.manager
+            
+            // Ensure RealMintAPI is created here (it uses the safe URLSession by default now)
             let api = RealMintAPI(baseURL: mint)
             let flow = MintCoordinator(manager: manager, api: api, blinding: manager.blinding)
             
             do {
+                // 1. Get Quote
                 let (invoice, qid) = try await flow.topUp(mint: mint, amount: amount)
                 
                 await MainActor.run {
@@ -260,6 +263,7 @@ struct WalletView: View {
                     self.paymentStatus = "Waiting for payment…"
                 }
                 
+                // 2. Start Polling (Pass the Coordinator to keep context)
                 pollForPayment(item: InvoiceItem(invoice: invoice, quoteId: qid), flow: flow, amount: amount)
                 
             } catch {
@@ -274,6 +278,8 @@ struct WalletView: View {
     private func pollForPayment(item: InvoiceItem, flow: MintCoordinator? = nil, amount: Int64 = 0) {
         self.isPolling = true
         let mint = activeMint
+        
+        // Reuse existing flow or create new one
         let activeFlow: MintCoordinator
         if let existing = flow {
             activeFlow = existing
@@ -287,15 +293,20 @@ struct WalletView: View {
         
         Task {
             do {
+                // 1. Wait for Payment
                 try await activeFlow.pollUntilPaid(mint: mint, invoice: item.invoice, quoteId: item.quoteId)
-                await MainActor.run { paymentStatus = "Paid. Fetching tokens…" }
                 
+                await MainActor.run { paymentStatus = "Paid. Minting tokens…" }
+                
+                // 2. Execute Mint (Handles 10002 Errors/Restores automatically)
                 try await activeFlow.receiveTokens(mint: mint, invoice: item.invoice, quoteId: item.quoteId, amount: amountToMint)
                 
                 await MainActor.run {
                     paymentStatus = "Tokens received!"
                     isPolling = false
                     invoiceItem = nil
+                    // Trigger UI refresh
+                    // wallet.refresh() // if needed
                 }
             } catch {
                 await MainActor.run {
@@ -385,9 +396,9 @@ struct WalletView: View {
         }
         .padding()
         .frame(minWidth: 300, minHeight: 300)
-        #if os(iOS)
+#if os(iOS)
         .presentationDetents([.height(250)])
-        #endif
+#endif
     }
     
     private var receiveEcashSheet: some View {
@@ -415,20 +426,38 @@ struct WalletView: View {
         }
         .padding()
         .frame(minWidth: 300, minHeight: 300)
-        #if os(iOS)
+#if os(iOS)
         .presentationDetents([.height(250)])
-        #endif
+#endif
     }
     
     private func createToken() {
         guard let amt = Int64(mintAmountString), amt > 0 else { return }
+        
         isProcessingEcash = true
         ecashError = nil
+        
         Task {
             do {
-                let token = try await wallet.manager.mintService.createToken(amount: amt, from: activeMint)
+                let mint = activeMint
+                
+                // 1. Select Proofs to Spend
+                // We need to gather enough proofs from the wallet to cover 'amt'
+                // Assuming you have a helper for coin selection, or we naively take all unspent.
+                let unspent = wallet.proofsByMint[mint.absoluteString]?.filter { $0.state == .unspent } ?? []
+                
+                let currentBalance = unspent.map(\.amount).reduce(0, +)
+                if currentBalance < amt {
+                    throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "Insufficient balance"])
+                }
+                
+                // 2. Perform Swap via MintService
+                // We ask the service to swap our inputs for: [Target Amount] + [Change]
+                // The service returns the serialized token string for the Target Amount.
+                let result = try await wallet.manager.mintService.swap(proofs: unspent, amount: amt, mint: mint)
+                
                 await MainActor.run {
-                    self.tokenToShare = token
+                    self.tokenToShare = result.token // The serialized token string
                     self.isProcessingEcash = false
                 }
             } catch {
@@ -443,13 +472,38 @@ struct WalletView: View {
     private func claimToken() {
         let cleanToken = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanToken.isEmpty else { return }
+        
         isProcessingEcash = true
         ecashError = nil
+        
         Task {
-            await MainActor.run {
-                self.isProcessingEcash = false
-                self.showReceiveSheet = false
-                self.tokenInput = ""
+            do {
+                // 1. Init Coordinator
+                // Note: We initialize with activeMint, but the receive(token:) method
+                // extracts the *actual* Mint URL from the token string itself.
+                let manager = wallet.manager
+                let api = RealMintAPI(baseURL: activeMint)
+                let flow = MintCoordinator(manager: manager, api: api, blinding: manager.blinding)
+                
+                // 2. Call the new Receive Logic
+                try await flow.receive(token: cleanToken)
+                
+                // 3. Success UI Update
+                await MainActor.run {
+                    self.isProcessingEcash = false
+                    self.showReceiveSheet = false
+                    self.tokenInput = ""
+                    // Optional: Trigger a haptic feedback
+#if os(iOS)
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+#endif
+                }
+            } catch {
+                await MainActor.run {
+                    self.ecashError = error.localizedDescription
+                    self.isProcessingEcash = false
+                }
             }
         }
     }
