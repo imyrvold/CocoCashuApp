@@ -36,79 +36,94 @@ struct WalletView: View {
     @State private var isProcessingEcash = false
     
     @State private var showingMelt = false
-    
+    @State private var showBackup = false
+
     var body: some View {
-        VStack(spacing: 24) {
-            
-            // MARK: - Balance Card
-            ZStack {
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
+        NavigationStack {
+            VStack(spacing: 24) {
                 
-                VStack(spacing: 8) {
-                    Text("Total Balance")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.8))
-                        .textCase(.uppercase)
+                // MARK: - Balance Card
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
                     
-                    Text("\(balance(for: activeMint))")
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    + Text(" sats")
-                        .font(.title2)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                .padding(.vertical, 30)
-            }
-            .frame(height: 160)
-            .padding(.horizontal)
-            
-            // MARK: - Action Buttons
-            HStack(spacing: 20) {
-                ActionButton(icon: "plus", label: "Mint", color: .blue) {
-                    showMintSheet = true
-                }
-                .sheet(isPresented: $showMintSheet) { mintInputSheet }
-                
-                ActionButton(icon: "paperplane", label: "Send", color: .orange) {
-                    showSendSheet = true // Re-use or make new sheet
-                }
-                .sheet(isPresented: $showSendSheet) { sendEcashSheet }
-                
-                ActionButton(icon: "arrow.down.doc", label: "Receive", color: .green) {
-                    showReceiveSheet = true
-                }
-                .sheet(isPresented: $showReceiveSheet) { receiveEcashSheet }
-                
-                ActionButton(icon: "bolt.fill", label: "Pay", color: .purple) {
-                    showingMelt = true
-                }
-                .sheet(isPresented: $showingMelt) {
-                    MeltView(wallet: wallet)
-                }
-            }
-            .padding(.horizontal)
-            
-            // MARK: - Transaction History
-            VStack(alignment: .leading) {
-                Text("History")
-                    .font(.headline)
-                    .padding(.horizontal)
-                
-                if wallet.transactions.isEmpty {
-                    ContentUnavailableView("No Transactions", systemImage: "clock", description: Text("Your recent activity will appear here."))
-                } else {
-                    List {
-                        ForEach(wallet.transactions) { tx in
-                            TransactionRow(tx: tx)
-                        }
+                    VStack(spacing: 8) {
+                        Text("Total Balance")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .textCase(.uppercase)
+                        
+                        Text("\(balance(for: activeMint))")
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        + Text(" sats")
+                            .font(.title2)
+                            .foregroundStyle(.white.opacity(0.9))
                     }
-                    .listStyle(.plain)
+                    .padding(.vertical, 30)
                 }
+                .frame(height: 160)
+                .padding(.horizontal)
+                
+                // MARK: - Action Buttons
+                HStack(spacing: 20) {
+                    ActionButton(icon: "plus", label: "Mint", color: .blue) {
+                        showMintSheet = true
+                    }
+                    .sheet(isPresented: $showMintSheet) { mintInputSheet }
+                    
+                    ActionButton(icon: "paperplane", label: "Send", color: .orange) {
+                        showSendSheet = true // Re-use or make new sheet
+                    }
+                    .sheet(isPresented: $showSendSheet) { sendEcashSheet }
+                    
+                    ActionButton(icon: "arrow.down.doc", label: "Receive", color: .green) {
+                        showReceiveSheet = true
+                    }
+                    .sheet(isPresented: $showReceiveSheet) { receiveEcashSheet }
+                    
+                    ActionButton(icon: "bolt.fill", label: "Pay", color: .purple) {
+                        showingMelt = true
+                    }
+                    .sheet(isPresented: $showingMelt) {
+                        MeltView(wallet: wallet)
+                    }
+                }
+                .padding(.horizontal)
+                
+                // MARK: - Transaction History
+                VStack(alignment: .leading) {
+                    Text("History")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    if wallet.transactions.isEmpty {
+                        ContentUnavailableView("No Transactions", systemImage: "clock", description: Text("Your recent activity will appear here."))
+                    } else {
+                        List {
+                            ForEach(wallet.transactions) { tx in
+                                TransactionRow(tx: tx)
+                            }
+                        }
+                        .listStyle(.plain)
+                    }
+                }
+            }
+            .padding()
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showBackup = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                    }
+                }
+            }
+            .navigationDestination(isPresented: $showBackup) {
+                BackupView(wallet: wallet, activeMint: activeMint)
             }
         }
-        .padding()
         // QR Sheet logic
         .sheet(item: $invoiceItem) { item in
             paymentSheet(for: item)
@@ -200,6 +215,7 @@ struct WalletView: View {
             InvoiceSheet(invoice: item.invoice)
             
             if let status = paymentStatus {
+                let _ = print(status)
                 Text(status)
                     .font(.footnote)
                     .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)
@@ -229,10 +245,7 @@ struct WalletView: View {
             let mint = activeMint
             let manager = wallet.manager
             let api = RealMintAPI(baseURL: mint)
-            let engine = CocoBlindingEngine { mintURL in
-                try await RealMintAPI(baseURL: mintURL).fetchKeyset()
-            }
-            let flow = MintCoordinator(manager: manager, api: api, blinding: engine)
+            let flow = MintCoordinator(manager: manager, api: api, blinding: manager.blinding)
             
             do {
                 let (invoice, qid) = try await flow.topUp(mint: mint, amount: amount)
@@ -267,8 +280,7 @@ struct WalletView: View {
         } else {
             let manager = wallet.manager
             let api = RealMintAPI(baseURL: mint)
-            let engine = CocoBlindingEngine { u in try await RealMintAPI(baseURL: u).fetchKeyset() }
-            activeFlow = MintCoordinator(manager: manager, api: api, blinding: engine)
+            activeFlow = MintCoordinator(manager: manager, api: api, blinding: manager.blinding)
         }
         
         let amountToMint = (amount > 0) ? amount : (Int64(mintAmountString) ?? 0)

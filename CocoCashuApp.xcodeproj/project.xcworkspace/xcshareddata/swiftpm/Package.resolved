@@ -2,6 +2,15 @@
   "originHash" : "4c9b504a5522c712b53b7d1f6ba7fa1135797ddb9832c8888137bda3cf121055",
   "pins" : [
     {
+      "identity" : "bip39",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pengpengliu/BIP39",
+      "state" : {
+        "revision" : "e79bd90275e50643cf8f97208ffa536d0def3ec7",
+        "version" : "1.0.1"
+      }
+    },
+    {
       "identity" : "secp256k1.swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/GigaBitcoin/secp256k1.swift",

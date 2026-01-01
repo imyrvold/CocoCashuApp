@@ -1,11 +1,19 @@
 import SwiftUI
-import CocoCashuCore // Ensure this is imported to access SeedManager
+import CocoCashuUI
+import CocoCashuCore
 
 struct BackupView: View {
     @State private var words: [String] = []
     @State private var isRevealed = false
     @State private var copied = false
-    
+    @State private var isScanning = false
+    @State private var isRestoring = false
+    @State private var showAlert = false
+    @State private var alertMessage = ""
+    @State private var showImportSheet = false
+    let wallet: ObservableWallet
+    let activeMint: URL
+
     var body: some View {
         List {
             Section {
@@ -77,8 +85,58 @@ struct BackupView: View {
                         .foregroundStyle(.red)
                 }
             }
+            
+            Section {
+                Text("Scan for Lost Funds")
+                    .font(.headline)
+                    .padding(.vertical, 5)
+            }
+            
+            Section {
+                Button {
+                    startScan() // Call helper function
+                } label: {
+                    HStack {
+                        if isScanning {
+                            ProgressView()
+                                .padding(.trailing, 5)
+                        } else {
+                            Image(systemName: "square.and.arrow.down.fill")
+                        }
+                        Text(isScanning ? "Scanning..." : "Scan for Lost Funds")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                }
+                .disabled(isScanning)
+            } header: {
+                Text("Recovery")
+            } footer: {
+                Text("This scans the mint for any tokens derived from your seed that are not currently on your device.")
+            }
+            
+            Section {
+                Button {
+                    showImportSheet = true
+                } label: {
+                    Label("Import / Recover Wallet", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Danger Zone")
+            } footer: {
+                Text("Replace the current wallet with an existing backup.")
+            }
         }
         .navigationTitle("Backup")
+        .sheet(isPresented: $showImportSheet) {
+            ImportWalletView()
+        }
+        .alert("Scan Complete", isPresented: $showAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage)
+        }
     }
     
     private func revealSeed() {
@@ -88,6 +146,25 @@ struct BackupView: View {
             withAnimation {
                 isRevealed = true
             }
+        }
+    }
+    
+    private func startScan() {
+        isScanning = true
+        Task {
+            do {
+                // 1. Call the clean function on Wallet
+                let count = try await wallet.scanForFunds(mint: activeMint)
+                
+                // 2. Handle Success
+                alertMessage = "Restored \(count) tokens!"
+                showAlert = true
+            } catch {
+                // 3. Handle Error
+                alertMessage = "Error: \(error.localizedDescription)"
+                showAlert = true
+            }
+            isScanning = false
         }
     }
 }

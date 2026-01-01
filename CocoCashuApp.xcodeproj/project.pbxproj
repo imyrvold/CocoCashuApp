@@ -8,11 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		F617F7822EFD3D27000B350E /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = F617F7812EFD3D27000B350E /* README.md */; };
-		F617F7B22EFE6024000B350E /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7B12EFE6024000B350E /* CocoCashuCore */; };
-		F617F7B42EFE6024000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7B32EFE6024000B350E /* CocoCashuUI */; };
-		F617F7C02EFEC263000B350E /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7BF2EFEC263000B350E /* CocoCashuCore */; };
 		F617F7C22EFEC263000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7C12EFEC263000B350E /* CocoCashuUI */; };
-		F617F7C32EFEC363000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9952EA3EF18009B1492 /* CocoCashuUI */; };
+		F617F7DA2F000FC0000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9952EA3EF18009B1492 /* CocoCashuUI */; };
+		F617F7DB2F000FC0000B350E /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7B12EFE6024000B350E /* CocoCashuCore */; };
+		F617F7DC2F000FC0000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7B32EFE6024000B350E /* CocoCashuUI */; };
+		F617F7DD2F000FC0000B350E /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7BF2EFEC263000B350E /* CocoCashuCore */; };
 		F687B9942EA3EF18009B1492 /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9932EA3EF18009B1492 /* CocoCashuCore */; };
 /* End PBXBuildFile section */
 
@@ -63,10 +63,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F617F7C32EFEC363000B350E /* CocoCashuUI in Frameworks */,
-				F617F7B22EFE6024000B350E /* CocoCashuCore in Frameworks */,
-				F617F7B42EFE6024000B350E /* CocoCashuUI in Frameworks */,
-				F617F7C02EFEC263000B350E /* CocoCashuCore in Frameworks */,
+				F617F7DD2F000FC0000B350E /* CocoCashuCore in Frameworks */,
+				F617F7DC2F000FC0000B350E /* CocoCashuUI in Frameworks */,
+				F617F7DB2F000FC0000B350E /* CocoCashuCore in Frameworks */,
+				F617F7DA2F000FC0000B350E /* CocoCashuUI in Frameworks */,
 				F687B9942EA3EF18009B1492 /* CocoCashuCore in Frameworks */,
 				F617F7C22EFEC263000B350E /* CocoCashuUI in Frameworks */,
 			);
