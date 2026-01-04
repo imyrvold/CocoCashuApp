@@ -17,7 +17,9 @@ struct RestoreView: View {
                     TextField("army van defense...", text: $wordsInput, axis: .vertical)
                         .lineLimit(3...4)
                         .autocorrectionDisabled()
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        #endif
                     
                     Text("Enter your 12-word seed phrase separated by spaces.")
                         .font(.caption)

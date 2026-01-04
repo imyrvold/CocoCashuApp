@@ -14,15 +14,16 @@ struct ImportWalletView: View {
                     // Text Editor for pasting words easily
                     TextEditor(text: $wordsInput)
                         .frame(height: 100)
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        #endif
                         .autocorrectionDisabled()
-                        .overlay(
+                        .overlay(alignment: .topLeading) {
                             Text("Enter your 12 words separated by spaces...")
                                 .foregroundStyle(.gray.opacity(wordsInput.isEmpty ? 0.5 : 0))
                                 .padding(.top, 8)
-                                .padding(.leading, 5),
-                            alignment: .topLeading
-                        )
+                                .padding(.leading, 5)
+                        }
                     
                     Text("This will replace your current wallet. Make sure you have backed up any funds currently on this device!")
                         .font(.caption)

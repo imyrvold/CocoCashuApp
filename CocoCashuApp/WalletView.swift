@@ -215,7 +215,6 @@ struct WalletView: View {
             InvoiceSheet(invoice: item.invoice)
             
             if let status = paymentStatus {
-                let _ = print(status)
                 Text(status)
                     .font(.footnote)
                     .foregroundStyle(status.hasPrefix("Error") ? .red : .secondary)

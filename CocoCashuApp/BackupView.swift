@@ -50,12 +50,19 @@ struct BackupView: View {
                     
                     Button {
                         let string = words.joined(separator: " ")
+                        #if os(iOS)
                         UIPasteboard.general.string = string
+                        #elseif os(macOS)
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(string, forType: .string)
+                        #endif
                         copied = true
                         
                         // Haptic Feedback
+                        #if os(iOS)
                         let generator = UINotificationFeedbackGenerator()
                         generator.notificationOccurred(.success)
+                        #endif
                         
                         // Reset "Copied" text after 2s
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
