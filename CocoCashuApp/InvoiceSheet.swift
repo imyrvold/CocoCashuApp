@@ -9,6 +9,7 @@ import AppKit
 
 struct InvoiceSheet: View {
     let invoice: String
+    @State private var copiedFormat: String? = nil
     
     var body: some View {
         VStack(spacing: 16) {
@@ -46,17 +47,23 @@ struct InvoiceSheet: View {
             
             // Copy Buttons
             HStack {
-                Button("Copy bolt11") {
+                CopyButton(label: "Copy bolt11", format: "bolt11", copiedFormat: $copiedFormat) {
                     copyToClipboard(cleaned)
                 }
-                .buttonStyle(.bordered)
                 
-                Button("Copy lightning:") {
+                CopyButton(label: "Copy lightning:", format: "lightning", copiedFormat: $copiedFormat) {
                     copyToClipboard("lightning:\(cleaned)")
                 }
-                .buttonStyle(.bordered)
+            }
+            
+            if copiedFormat != nil {
+                Text("Invoice copied to clipboard")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: copiedFormat)
         .padding()
         // Limit frame size only on macOS to look like a dialog
         #if os(macOS)
@@ -111,6 +118,40 @@ struct InvoiceSheet: View {
         return image
     }
     #endif
+}
+
+// MARK: - Copy Button with Feedback
+private struct CopyButton: View {
+    let label: String
+    let format: String
+    @Binding var copiedFormat: String?
+    let action: () -> Void
+    
+    private var isCopied: Bool { copiedFormat == format }
+    
+    var body: some View {
+        Button {
+            action()
+            copiedFormat = format
+            #if os(iOS)
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+            #endif
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                if copiedFormat == format {
+                    copiedFormat = nil
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                Text(isCopied ? "Copied!" : label)
+            }
+        }
+        .buttonStyle(.bordered)
+        .tint(isCopied ? .green : nil)
+    }
 }
 
 // 3. SwiftUI Image Extension for Cross-Platform Compatibility

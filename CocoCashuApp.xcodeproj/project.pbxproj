@@ -9,10 +9,6 @@
 /* Begin PBXBuildFile section */
 		F617F7822EFD3D27000B350E /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = F617F7812EFD3D27000B350E /* README.md */; };
 		F617F7C22EFEC263000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7C12EFEC263000B350E /* CocoCashuUI */; };
-		F617F7DA2F000FC0000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9952EA3EF18009B1492 /* CocoCashuUI */; };
-		F617F7DB2F000FC0000B350E /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7B12EFE6024000B350E /* CocoCashuCore */; };
-		F617F7DC2F000FC0000B350E /* CocoCashuUI in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7B32EFE6024000B350E /* CocoCashuUI */; };
-		F617F7DD2F000FC0000B350E /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F617F7BF2EFEC263000B350E /* CocoCashuCore */; };
 		F687B9942EA3EF18009B1492 /* CocoCashuCore in Frameworks */ = {isa = PBXBuildFile; productRef = F687B9932EA3EF18009B1492 /* CocoCashuCore */; };
 /* End PBXBuildFile section */
 
@@ -63,10 +59,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F617F7DD2F000FC0000B350E /* CocoCashuCore in Frameworks */,
-				F617F7DC2F000FC0000B350E /* CocoCashuUI in Frameworks */,
-				F617F7DB2F000FC0000B350E /* CocoCashuCore in Frameworks */,
-				F617F7DA2F000FC0000B350E /* CocoCashuUI in Frameworks */,
 				F687B9942EA3EF18009B1492 /* CocoCashuCore in Frameworks */,
 				F617F7C22EFEC263000B350E /* CocoCashuUI in Frameworks */,
 			);
@@ -220,7 +212,7 @@
 			mainGroup = F687B95F2EA3EE83009B1492;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F617F7BE2EFEC263000B350E /* XCLocalSwiftPackageReference "../CocoCashuSwift" */,
+				F6D4A1092F52E87800E7E0EF /* XCRemoteSwiftPackageReference "CocoCashuSwift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F687B9692EA3EE83009B1492 /* Products */;
@@ -666,12 +658,16 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		F617F7BE2EFEC263000B350E /* XCLocalSwiftPackageReference "../CocoCashuSwift" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../CocoCashuSwift;
+/* Begin XCRemoteSwiftPackageReference section */
+		F6D4A1092F52E87800E7E0EF /* XCRemoteSwiftPackageReference "CocoCashuSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/imyrvold/CocoCashuSwift.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
 		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		F617F7B12EFE6024000B350E /* CocoCashuCore */ = {
