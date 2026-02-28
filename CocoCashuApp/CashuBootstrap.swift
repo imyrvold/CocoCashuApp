@@ -14,32 +14,31 @@ enum CashuBootstrap {
     let keysetId: String
   }
 
+  static let defaultMint = URL(string: "https://cashu.cz")!
+
   static func makeWallet() async -> ObservableWallet {
-      // 1. Repositories (Keep existing)
+      // 1. Repositories
     let proofRepo = InMemoryProofRepository()
     let quoteRepo = InMemoryQuoteRepository()
     let mintRepo  = InMemoryMintRepository()
     let counterRepo = InMemoryCounterRepository()
 
-      // In makeWallet()
-      let api = RealMintAPI(baseURL: URL(string: "https://cashu.cz")!)
+      let api = RealMintAPI(baseURL: defaultMint)
       
-      // 2. SEED LOGIC (New)
+      // 2. SEED LOGIC
       // We attempt to retrieve an existing seed. If none exists, we create a new wallet.
       let seedData: Data
       
-      if let phrase = SeedManager.shared.retrieveFromKeychain() {
-          print("🔐 Bootstrap: Loading existing wallet.")
-          // Force unwrap is safe here because we just retrieved it from valid storage
-          seedData = try! SeedManager.shared.seed(from: phrase)
-      } else {
-          print("🌱 Bootstrap: No seed found. Creating new wallet.")
-          // Generate 12 words
-          let newPhrase = try! SeedManager.shared.generateNewMnemonic()
-          // Save to Keychain
-          try! SeedManager.shared.saveToKeychain(phrase: newPhrase)
-          // Derive Seed
-          seedData = try! SeedManager.shared.seed(from: newPhrase)
+      do {
+          if let phrase = SeedManager.shared.retrieveFromKeychain() {
+              seedData = try SeedManager.shared.seed(from: phrase)
+          } else {
+              let newPhrase = try SeedManager.shared.generateNewMnemonic()
+              try SeedManager.shared.saveToKeychain(phrase: newPhrase)
+              seedData = try SeedManager.shared.seed(from: newPhrase)
+          }
+      } catch {
+          fatalError("CashuBootstrap: Failed to initialize wallet seed — \(error.localizedDescription)")
       }
       
       // 3. Initialize Engine with Seed (Replaces the old closure-based init)
@@ -93,7 +92,7 @@ enum CashuBootstrap {
             StoredProof(
                 amount: p.amount,
                 mint: p.mint.absoluteString,
-                secretBase64: String(data: p.secret, encoding: .utf8) ?? "", // Or base64EncodedString()
+                secretBase64: p.secret.base64EncodedString(),
                 C: p.C,
                 keysetId: p.keysetId
             )
@@ -138,6 +137,7 @@ enum CashuBootstrap {
       base = URL(fileURLWithPath: NSTemporaryDirectory())
     }
     let dir = base.appendingPathComponent("CocoCashuWallet", isDirectory: true)
+    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir.appendingPathComponent("proofs.json")
   }
 }

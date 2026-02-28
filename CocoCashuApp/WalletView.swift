@@ -25,7 +25,7 @@ struct WalletView: View {
     @State private var isPolling = false
     @State private var paymentStatus: String? = nil
     
-    private let activeMint = URL(string: "https://cashu.cz")!
+    private let activeMint = CashuBootstrap.defaultMint
     
     // Ecash State
     @State private var showSendSheet = false
@@ -538,17 +538,48 @@ struct ActionButton: View {
 struct TransactionRow: View {
     let tx: CashuTransaction
     
+    private var isIncoming: Bool {
+        tx.type == .mint || tx.type == .receiveEcash
+    }
+    
+    private var iconName: String {
+        switch tx.type {
+        case .mint:         return "arrow.down.left"
+        case .melt:         return "arrow.up.right"
+        case .sendEcash:    return "paperplane"
+        case .receiveEcash: return "arrow.down.doc"
+        }
+    }
+    
+    private var iconColor: Color {
+        switch tx.type {
+        case .mint:         return .green
+        case .melt:         return .purple
+        case .sendEcash:    return .orange
+        case .receiveEcash: return .green
+        }
+    }
+    
+    private var label: String {
+        switch tx.type {
+        case .mint:         return "Minted"
+        case .melt:         return "Sent Lightning"
+        case .sendEcash:    return "Sent Ecash"
+        case .receiveEcash: return "Received Ecash"
+        }
+    }
+    
     var body: some View {
         HStack {
             ZStack {
-                Circle().fill(tx.type == .mint ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
+                Circle().fill(iconColor.opacity(0.1))
                     .frame(width: 40, height: 40)
-                Image(systemName: tx.type == .mint ? "arrow.down.left" : "arrow.up.right")
-                    .foregroundStyle(tx.type == .mint ? .green : .orange)
+                Image(systemName: iconName)
+                    .foregroundStyle(iconColor)
             }
             
             VStack(alignment: .leading) {
-                Text(tx.type == .mint ? "Minted" : "Sent Lightning")
+                Text(label)
                     .font(.body.weight(.medium))
                 Text(tx.timestamp.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
@@ -558,9 +589,9 @@ struct TransactionRow: View {
             Spacer()
             
             VStack(alignment: .trailing) {
-                Text((tx.type == .mint ? "+" : "-") + "\(tx.amount)")
+                Text((isIncoming ? "+" : "-") + "\(tx.amount)")
                     .font(.body.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(tx.type == .mint ? .green : .primary)
+                    .foregroundStyle(isIncoming ? .green : .primary)
                 
                 if tx.status == .failed {
                     Text("Failed").font(.caption).foregroundStyle(.red)
