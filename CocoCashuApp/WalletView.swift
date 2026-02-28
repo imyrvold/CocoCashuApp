@@ -25,7 +25,7 @@ struct WalletView: View {
     @State private var isPolling = false
     @State private var paymentStatus: String? = nil
     
-    private let activeMint = URL(string: "https://cashu.cz")!
+    private let activeMint = CashuBootstrap.defaultMint
     
     // Ecash State
     @State private var showSendSheet = false
