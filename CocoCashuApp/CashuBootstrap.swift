@@ -21,7 +21,9 @@ enum CashuBootstrap {
     let proofRepo = InMemoryProofRepository()
     let quoteRepo = InMemoryQuoteRepository()
     let mintRepo  = InMemoryMintRepository()
-    let counterRepo = InMemoryCounterRepository()
+    // Persistent NUT-13 derivation counter: survives restarts so deterministic
+    // secrets are never reused and minted proofs stay restorable from the seed.
+    let counterRepo = FileCounterRepository(url: counterStoreURL())
 
       let api = RealMintAPI(baseURL: defaultMint)
       
@@ -43,7 +45,7 @@ enum CashuBootstrap {
       
       // 3. Initialize Engine with Seed (Replaces the old closure-based init)
       // Ensure your CocoBlindingEngine in the library now has 'init(seed: Data)'
-      let engine = CocoBlindingEngine(seed: seedData) { mintURL in
+      let engine = CocoBlindingEngine(seed: seedData, counterRepo: counterRepo) { mintURL in
           let tempApi = RealMintAPI(baseURL: mintURL)
           return try await tempApi.fetchKeyset()
       }
@@ -139,6 +141,28 @@ enum CashuBootstrap {
     let dir = base.appendingPathComponent("CocoCashuWallet", isDirectory: true)
     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir.appendingPathComponent("proofs.json")
+  }
+
+  private static func counterStoreURL() -> URL {
+    storeURL().deletingLastPathComponent().appendingPathComponent("counters.json")
+  }
+
+  // MARK: - Reset
+
+  /// Clears the stored balance only. Keeps the seed AND the NUT-13 counter, so
+  /// future derivations continue forward and never reuse blinded outputs.
+  /// Safe, but does not recover indices the mint has already seen.
+  static func clearBalance() {
+    try? FileManager.default.removeItem(at: storeURL())
+  }
+
+  /// Full wallet reset: wipes balance, the NUT-13 counter, and the seed from the
+  /// Keychain. On next launch a brand-new seed is generated with a fresh counter,
+  /// giving a clean derivation space (no output-reuse collisions).
+  static func resetWalletNewSeed() {
+    try? FileManager.default.removeItem(at: storeURL())
+    try? FileManager.default.removeItem(at: counterStoreURL())
+    SeedManager.shared.deleteFromKeychain()
   }
 }
 

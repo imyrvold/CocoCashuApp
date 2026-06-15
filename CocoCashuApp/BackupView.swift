@@ -11,6 +11,8 @@ struct BackupView: View {
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var showImportSheet = false
+    @State private var showResetConfirm = false
+    @State private var showClearConfirm = false
     let wallet: ObservableWallet
     let activeMint: URL
 
@@ -129,10 +131,24 @@ struct BackupView: View {
                     Label("Import / Recover Wallet", systemImage: "arrow.triangle.2.circlepath")
                         .foregroundStyle(.red)
                 }
+
+                Button {
+                    showClearConfirm = true
+                } label: {
+                    Label("Clear Balance (Keep Wallet)", systemImage: "trash")
+                        .foregroundStyle(.red)
+                }
+
+                Button {
+                    showResetConfirm = true
+                } label: {
+                    Label("Reset Wallet (New Seed)", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
             } header: {
                 Text("Danger Zone")
             } footer: {
-                Text("Replace the current wallet with an existing backup.")
+                Text("Clear Balance removes local proofs but keeps your seed and derivation counter (safe). Reset Wallet generates a brand-new seed — only its recovery phrase can restore any future funds.")
             }
         }
         .navigationTitle("Backup")
@@ -143,6 +159,24 @@ struct BackupView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(alertMessage)
+        }
+        .alert("Clear Balance?", isPresented: $showClearConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear & Quit", role: .destructive) {
+                CashuBootstrap.clearBalance()
+                exit(0)
+            }
+        } message: {
+            Text("This deletes the proofs stored on this device. Your seed and counter are kept. The app will close — reopen it to continue.")
+        }
+        .alert("Reset Wallet?", isPresented: $showResetConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset & Quit", role: .destructive) {
+                CashuBootstrap.resetWalletNewSeed()
+                exit(0)
+            }
+        } message: {
+            Text("This permanently deletes the current seed and all local funds, then generates a NEW wallet on next launch. Back up your recovery phrase first if you need it. The app will close — reopen it to start fresh.")
         }
     }
     
