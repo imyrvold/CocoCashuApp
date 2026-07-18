@@ -401,6 +401,40 @@ longer be found by "Scan for Lost Funds". Ship before real users rely on seed ba
   mid-operation, cross-mint melt from a non-default mint.
 
 ### Verification status
-`swift test` → 11/11 pass (official NUT-12 DLEQ vector, NUT-13 v00+v01 derivation
-vectors, keyset-ID validation/rejection). `xcodebuild -scheme CocoCashuApp` → BUILD
-SUCCEEDED.
+`swift test` → 21/21 pass (official NUT-00 V4, NUT-12 DLEQ and NUT-13 v00/v01
+vectors, keyset-ID validation/rejection, Int64-overflow regression, and
+FileProofRepository round-trip/migration/recovery). `xcodebuild -scheme
+CocoCashuApp` → BUILD SUCCEEDED.
+
+## Architecture — moving domain logic into the library
+
+The audit fixes exposed that several bugs lived in the app because domain logic
+(persistence, orchestration, parsing) had leaked out of the library. Rebalancing:
+
+### Done
+- **Proof persistence → library (`FileProofRepository`).** The app previously
+  hand-rolled persistence: an event-subscription save loop in `CashuBootstrap`
+  plus a `StoredProof` translation struct (duplicated in `ObservableWallet`).
+  That seam caused the double-writer race, the reserved/pending-not-persisted
+  bugs, and the `StoredProof.state` gap. Now a disk-backed `ProofRepository`
+  lives in the library beside `FileCounterRepository`: bookkeeping is a shared
+  pure `ProofStore` (so the in-memory and file repos can't diverge), it persists
+  after each mutation (atomic + complete file protection), reloads `.reserved`
+  as `.pending` for reconciliation, drops spent proofs to bound file growth, and
+  migrates the legacy `StoredProof` JSON so upgrading wallets keep their balance.
+  `CashuBootstrap` shrank from ~224 to ~150 lines (no save loop, no restore, no
+  `StoredProof`). Covered by four new persistence tests.
+
+### Candidate follow-ups (identified, not yet done)
+- **BOLT11 amount decoding → library.** Still in `MeltView.decodeAmount`
+  (pure, testable, previously duplicated + had a truncation bug). Move to `Core`
+  with vectors.
+- **Multi-mint orchestration → library, backed by `MintRepository`.** The
+  `MintRepository` is injected through `CashuManager` but only referenced in an
+  empty `syncMints()` hook — effectively dead. The app infers known mints from
+  `proofsByMint.keys` and runs the scan-all-mints loop and cross-mint coin
+  selection in the UI (`WalletView.mintBalances`, `BackupView.scanTargets`).
+  Populate `MintRepository` for real and expose `scanAllMints()` / coin selection
+  as library methods.
+- **Bootstrap wiring → a library factory** (e.g. `CashuWallet.makeDefault(mint:storageURL:)`),
+  leaving the app to supply only the mint URL and storage location.
