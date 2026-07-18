@@ -12,6 +12,9 @@ enum CashuBootstrap {
     let secretBase64: String
     let C: String
     let keysetId: String
+    // Persisted so `.pending` proofs (melt outcome unknown) survive an app kill and
+    // can be reconciled on next launch. Absent in legacy files → treated as unspent.
+    var state: ProofState?
   }
 
   static let defaultMint = URL(string: "https://cashu.cz")!
@@ -32,7 +35,11 @@ enum CashuBootstrap {
       let seedData: Data
       
       do {
-          if let phrase = SeedManager.shared.retrieveFromKeychain() {
+          // retrieveFromKeychain returns nil ONLY on a positive "no item exists";
+          // any other keychain failure throws, and we fail closed (crash) below —
+          // generating a new seed on a transient keychain error would overwrite
+          // and permanently destroy the real one.
+          if let phrase = try SeedManager.shared.retrieveFromKeychain() {
               seedData = try SeedManager.shared.seed(from: phrase)
           } else {
               let newPhrase = try SeedManager.shared.generateNewMnemonic()
@@ -76,7 +83,13 @@ enum CashuBootstrap {
 
       // 6. Refresh
     await wallet.refreshAll()
-      
+
+      // 7. Reconcile any melt left `.pending` by a prior ambiguous failure or app
+      //    kill (NUT-07 checkstate), then refresh so resolved proofs reflect in the
+      //    balance. Best-effort: if the mint is unreachable, they stay pending.
+      try? await manager.mintService.reconcilePending(mint: defaultMint)
+      await wallet.refreshAll()
+
     return wallet
   }
     
@@ -88,22 +101,36 @@ enum CashuBootstrap {
         // Ideally, add 'getAll()' to your Repository protocol.
         // For now, let's save the 'unspent' ones to keep your balance safe.
         
-        guard let proofs = try? await manager.proofService.getUnspent(mint: nil) else { return }
-        
+        // Persist unspent, pending AND reserved proofs. Pending ones (operation
+        // outcome unknown) must survive a kill so `reconcilePending` resolves them
+        // next launch. Reserved ones are mid-operation money — omitting them (the
+        // old behavior) meant an app kill during a send erased them from disk.
+        let unspent = (try? await manager.proofService.getUnspent(mint: nil)) ?? []
+        let pending = (try? await manager.proofService.pendingProofs(mint: nil)) ?? []
+        let reserved = (try? await manager.proofService.reservedProofs(mint: nil)) ?? []
+        let proofs = unspent + pending + reserved
+
         let storedItems = proofs.map { p in
             StoredProof(
                 amount: p.amount,
                 mint: p.mint.absoluteString,
                 secretBase64: p.secret.base64EncodedString(),
                 C: p.C,
-                keysetId: p.keysetId
+                keysetId: p.keysetId,
+                state: p.state
             )
         }
         
         let url = storeURL()
         if let data = try? JSONEncoder().encode(storedItems) {
-            try? data.write(to: url)
-            // print("💾 Saved \(storedItems.count) proofs to disk")
+            // Proofs are bearer money: write with complete file protection so the
+            // file is unreadable while the device is locked, and atomically to
+            // avoid a torn write corrupting the balance.
+            var options: Data.WritingOptions = [.atomic]
+            #if os(iOS)
+            options.insert(.completeFileProtection)
+            #endif
+            try? data.write(to: url, options: options)
         }
     }
 
@@ -116,7 +143,12 @@ enum CashuBootstrap {
     let proofs: [Proof] = stored.compactMap { item in
       guard let mintURL = URL(string: item.mint),
             let secret = Data(base64Encoded: item.secretBase64) else { return nil }
-        return Proof(amount: item.amount, mint: mintURL, secret: secret, C: item.C, keysetId: item.keysetId)
+        // A proof persisted as `.reserved` belonged to an operation the app died in
+        // the middle of — its outcome is unknown, so load it as `.pending` and let
+        // the launch NUT-07 reconciliation decide (spent → finalize, else release).
+        var state = item.state ?? .unspent
+        if state == .reserved { state = .pending }
+        return Proof(amount: item.amount, mint: mintURL, secret: secret, C: item.C, keysetId: item.keysetId, state: state)
     }
     guard !proofs.isEmpty else { return }
 
@@ -138,13 +170,23 @@ enum CashuBootstrap {
     } else {
       base = URL(fileURLWithPath: NSTemporaryDirectory())
     }
-    let dir = base.appendingPathComponent("CocoCashuWallet", isDirectory: true)
+    var dir = base.appendingPathComponent("CocoCashuWallet", isDirectory: true)
     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    // Keep the wallet directory (proofs, counters, history) out of iCloud/iTunes
+    // backups so bearer proofs and the derivation counter can't be exfiltrated
+    // from a backup or restored onto another device.
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? dir.setResourceValues(values)
     return dir.appendingPathComponent("proofs.json")
   }
 
   private static func counterStoreURL() -> URL {
     storeURL().deletingLastPathComponent().appendingPathComponent("counters.json")
+  }
+
+  private static func historyStoreURL() -> URL {
+    storeURL().deletingLastPathComponent().appendingPathComponent("history.json")
   }
 
   // MARK: - Reset
@@ -156,13 +198,27 @@ enum CashuBootstrap {
     try? FileManager.default.removeItem(at: storeURL())
   }
 
-  /// Full wallet reset: wipes balance, the NUT-13 counter, and the seed from the
-  /// Keychain. On next launch a brand-new seed is generated with a fresh counter,
-  /// giving a clean derivation space (no output-reuse collisions).
+  /// Full wallet reset: wipes balance, the NUT-13 counter, the transaction
+  /// history, and the seed from the Keychain. On next launch a brand-new seed is
+  /// generated with a fresh counter, giving a clean derivation space. History
+  /// must go too — amounts/timestamps surviving a "full" reset would leak the
+  /// old wallet's activity onto the supposedly clean one.
   static func resetWalletNewSeed() {
     try? FileManager.default.removeItem(at: storeURL())
     try? FileManager.default.removeItem(at: counterStoreURL())
+    try? FileManager.default.removeItem(at: historyStoreURL())
     SeedManager.shared.deleteFromKeychain()
+  }
+
+  /// Called after a DIFFERENT seed was imported into the Keychain: wipe every
+  /// piece of state that belongs to the old seed (proofs, counters, history) but
+  /// keep the newly saved seed. Without this, the app keeps the old proofs and —
+  /// until relaunch — keeps deriving from the old seed, so a user could mint
+  /// funds on seed A while BackupView shows them seed B as "their backup".
+  static func resetStateForImportedSeed() {
+    try? FileManager.default.removeItem(at: storeURL())
+    try? FileManager.default.removeItem(at: counterStoreURL())
+    try? FileManager.default.removeItem(at: historyStoreURL())
   }
 }
 

@@ -9,24 +9,19 @@ struct WalletView: View {
     
     // UI State
     @State private var invoiceItem: InvoiceItem? = nil
-    @State private var showWithdraw = false
-    @State private var withdrawInvoice = ""
-    @State private var withdrawAmount = ""
-    @State private var isWithdrawing = false
-    @State private var withdrawError: String? = nil
-    
+
     // Minting State
     @State private var showMintSheet = false
     @State private var mintAmountString = "100"
     @State private var isRequestingQuote = false
     @State private var mintError: String? = nil
-    
+
     // Payment tracking state
     @State private var isPolling = false
     @State private var paymentStatus: String? = nil
-    
+
     private let activeMint = CashuBootstrap.defaultMint
-    
+
     // Ecash State
     @State private var showSendSheet = false
     @State private var showReceiveSheet = false
@@ -34,6 +29,11 @@ struct WalletView: View {
     @State private var tokenInput = ""
     @State private var ecashError: String? = nil
     @State private var isProcessingEcash = false
+    // Send gets its OWN amount state — reusing mintAmountString pre-filled the
+    // send sheet with the last Mint amount, one tap away from an irreversible
+    // over-sized bearer token.
+    @State private var sendAmountString = ""
+    @State private var showDiscardTokenConfirm = false
     
     @State private var showingMelt = false
     @State private var showBackup = false
@@ -53,13 +53,32 @@ struct WalletView: View {
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.8))
                             .textCase(.uppercase)
-                        
-                        Text("\(balance(for: activeMint))")
+
+                        // Sum across ALL mints — receiving a token from another
+                        // mint (e.g. Minibits) stores its proofs under that mint,
+                        // and showing only the default mint made those funds
+                        // invisible even though they were safely received.
+                        (Text("\(totalBalance)")
                             .font(.system(size: 48, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                         + Text(" sats")
                             .font(.title2)
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(.white.opacity(0.9)))
+                        .privacySensitive()
+
+                        // Per-mint breakdown when funds live at more than one mint,
+                        // so it's clear where the money actually is.
+                        let breakdown = mintBalances
+                        if breakdown.count > 1 {
+                            VStack(spacing: 2) {
+                                ForEach(breakdown, id: \.host) { entry in
+                                    Text("\(entry.host): \(entry.balance) sats")
+                                        .font(.caption)
+                                        .foregroundStyle(.white.opacity(0.8))
+                                }
+                            }
+                            .privacySensitive()
+                        }
                     }
                     .padding(.vertical, 30)
                 }
@@ -171,45 +190,6 @@ struct WalletView: View {
 #endif
     }
     
-    private var withdrawSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Withdraw to Lightning").font(.headline)
-            Text("Paste a BOLT11 invoice and enter an amount in sats.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            Text("Invoice (BOLT11)")
-            TextField("lnbc1…", text: $withdrawInvoice)
-                .textFieldStyle(.roundedBorder)
-                .font(.footnote)
-                .onChange(of: withdrawInvoice) {
-                    if let sats = parseSatsFromBOLT11(withdrawInvoice) {
-                        withdrawAmount = String(sats)
-                    }
-                }
-            
-            Text("Amount (sats)")
-            TextField("0", text: $withdrawAmount)
-                .textFieldStyle(.roundedBorder)
-                .disabled(true)
-            
-            if isWithdrawing { ProgressView().padding(.vertical, 4) }
-            if let err = withdrawError { Text(err).foregroundStyle(.red).font(.footnote) }
-            
-            HStack {
-                Spacer()
-                Button("Cancel") { showWithdraw = false }
-                Button("Withdraw") {
-                    performWithdraw()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding()
-        .frame(minWidth: 360)
-    }
-    
     private func paymentSheet(for item: InvoiceItem) -> some View {
         VStack(spacing: 16) {
             InvoiceSheet(invoice: item.invoice)
@@ -316,28 +296,27 @@ struct WalletView: View {
         }
     }
     
-    private func performWithdraw() {
-        Task {
-            withdrawError = nil
-            guard let amt = parseSatsFromBOLT11(withdrawInvoice) else { withdrawError = "Could not parse amount"; return }
-            let dest = withdrawInvoice.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !dest.isEmpty else { withdrawError = "Invoice is empty"; return }
-            isWithdrawing = true
-            do {
-                try await wallet.manager.mintService.spend(amount: amt, from: activeMint, to: dest)
-                isWithdrawing = false
-                showWithdraw = false
-                withdrawInvoice = ""; withdrawAmount = ""; withdrawError = nil
-            } catch {
-                isWithdrawing = false
-                withdrawError = String(describing: error)
-            }
-        }
-    }
-    
     private func balance(for mint: URL) -> Int64 {
         let proofs = wallet.proofsByMint[mint.absoluteString] ?? []
         return proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
+    }
+
+    /// Unspent balance summed across every mint the wallet holds proofs at.
+    private var totalBalance: Int64 {
+        wallet.proofsByMint.values.reduce(0) { total, proofs in
+            total + proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
+        }
+    }
+
+    /// Per-mint balances (host name + sats), largest first, zero-balance mints omitted.
+    private var mintBalances: [(host: String, balance: Int64, url: String)] {
+        wallet.proofsByMint.compactMap { (urlString, proofs) in
+            let bal = proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
+            guard bal > 0 else { return nil }
+            let host = URL(string: urlString)?.host ?? urlString
+            return (host: host, balance: bal, url: urlString)
+        }
+        .sorted { $0.balance > $1.balance }
     }
     
     private var sendEcashSheet: some View {
@@ -356,41 +335,63 @@ struct WalletView: View {
                     .padding()
                     .background(Color.gray.opacity(0.1))
                     .cornerRadius(8)
-                
+                    .privacySensitive()
+
                 Button("Copy to Clipboard") {
 #if os(macOS)
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(token, forType: .string)
 #else
-                    UIPasteboard.general.string = token
+                    // The token is live money until the recipient claims it. Expire
+                    // it from the pasteboard after 5 minutes so it can't be scooped
+                    // up later by another app. (Not .localOnly — pasting on another
+                    // of the user's own devices via Universal Clipboard is a
+                    // legitimate way to share a token.)
+                    UIPasteboard.general.setItems(
+                        [["public.utf8-plain-text": token]],
+                        options: [.expirationDate: Date().addingTimeInterval(300)]
+                    )
 #endif
                 }
                 .buttonStyle(.borderedProminent)
                 
                 Button("Done") {
-                    tokenToShare = nil
-                    showSendSheet = false
+                    // The token string is the ONLY handle on money already swapped
+                    // away at the mint — never discard it silently.
+                    showDiscardTokenConfirm = true
+                }
+                .confirmationDialog(
+                    "Discard this token?",
+                    isPresented: $showDiscardTokenConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("I've shared it — Done", role: .destructive) {
+                        tokenToShare = nil
+                        showSendSheet = false
+                    }
+                    Button("Keep Showing", role: .cancel) { }
+                } message: {
+                    Text("Make sure you have copied or shared the token. Once dismissed, recovering unclaimed funds requires a full seed scan.")
                 }
             } else {
                 // Input State
                 Text("Enter amount to convert to token.")
                     .foregroundStyle(.secondary)
-                
-                TextField("Amount", text: $mintAmountString) // reusing state var for simplicity
+
+                TextField("Amount", text: $sendAmountString)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 150)
-                
+
                 if isProcessingEcash { ProgressView() }
                 if let err = ecashError {
-                    let _ = print("Ecash Error: \(err)")
                     Text(err).foregroundStyle(.red).font(.caption)
                 }
-                
+
                 Button("Create Token") {
                     createToken()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isProcessingEcash)
+                .disabled(isProcessingEcash || Int64(sendAmountString) == nil)
             }
         }
         .padding()
@@ -413,10 +414,9 @@ struct WalletView: View {
             
             if isProcessingEcash { ProgressView() }
             if let err = ecashError {
-                let _ = print("Ecash Error: \(err)")
                 Text(err).foregroundStyle(.red).font(.caption)
             }
-            
+
             Button("Claim Token") {
                 claimToken()
             }
@@ -431,24 +431,24 @@ struct WalletView: View {
     }
     
     private func createToken() {
-        guard let amt = Int64(mintAmountString), amt > 0 else { return }
+        guard let amt = Int64(sendAmountString), amt > 0 else { return }
         
         isProcessingEcash = true
         ecashError = nil
         
         Task {
             do {
-                let mint = activeMint
-                
-                // 1. Select Proofs to Spend
-                // We need to gather enough proofs from the wallet to cover 'amt'
-                // Assuming you have a helper for coin selection, or we naively take all unspent.
-                let unspent = wallet.proofsByMint[mint.absoluteString]?.filter { $0.state == .unspent } ?? []
-                
-                let currentBalance = unspent.map(\.amount).reduce(0, +)
-                if currentBalance < amt {
-                    throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "Insufficient balance"])
+                // 1. Pick a mint that can cover the amount (largest balance first).
+                // A Cashu token spends proofs from ONE mint; hardcoding the default
+                // mint made funds received at other mints (e.g. Minibits) unsendable
+                // even though the total balance covered the amount.
+                guard let source = mintBalances.first(where: { $0.balance >= amt }),
+                      let mint = URL(string: source.url) else {
+                    throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "No single mint holds enough balance for \(amt) sats. Tokens can only be created from one mint at a time."])
                 }
+
+                // 2. Select Proofs to Spend from that mint
+                let unspent = wallet.proofsByMint[mint.absoluteString]?.filter { $0.state == .unspent } ?? []
                 
                 // 2. Perform Swap via MintService
                 // We ask the service to swap our inputs for: [Target Amount] + [Change]
@@ -601,26 +601,6 @@ struct TransactionRow: View {
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-private func parseSatsFromBOLT11(_ bolt11: String) -> Int64? {
-    guard let lnRange = bolt11.range(of: "lnbc", options: [.caseInsensitive]) else { return nil }
-    let suffix = bolt11[lnRange.upperBound...]
-    var digits = ""
-    var unit: Character? = nil
-    for ch in suffix {
-        if ch.isNumber { digits.append(ch) }
-        else if "munp".contains(ch) { unit = ch; break }
-        else { break }
-    }
-    guard let unitChar = unit, let amountVal = Int64(digits), amountVal > 0 else { return nil }
-    switch unitChar {
-    case "m": return amountVal * 100_000
-    case "u": return amountVal * 100
-    case "n": guard amountVal % 10 == 0 else { return nil }; return amountVal / 10
-    case "p": guard amountVal % 10_000 == 0 else { return nil }; return amountVal / 10_000
-    default: return nil
     }
 }
 

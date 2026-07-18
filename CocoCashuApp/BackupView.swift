@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalAuthentication
 import CocoCashuUI
 import CocoCashuCore
 
@@ -13,6 +14,8 @@ struct BackupView: View {
     @State private var showImportSheet = false
     @State private var showResetConfirm = false
     @State private var showClearConfirm = false
+    @State private var customMintURL = ""
+    @Environment(\.scenePhase) private var scenePhase
     let wallet: ObservableWallet
     let activeMint: URL
 
@@ -49,14 +52,27 @@ struct BackupView: View {
                         }
                     }
                     .padding(.vertical)
-                    
+                    .privacySensitive()
+
                     Button {
                         let string = words.joined(separator: " ")
                         #if os(iOS)
-                        UIPasteboard.general.string = string
+                        // The seed is total wallet control. Keep it off Universal
+                        // Clipboard (.localOnly) and auto-purge it (.expirationDate)
+                        // so it can't linger for other apps or sync to nearby devices.
+                        UIPasteboard.general.setItems(
+                            [["public.utf8-plain-text": string]],
+                            options: [
+                                .localOnly: true,
+                                .expirationDate: Date().addingTimeInterval(60)
+                            ]
+                        )
                         #elseif os(macOS)
+                        // macOS has no per-item expiry, but mark the item "concealed"
+                        // so clipboard-history managers skip persisting the seed.
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(string, forType: .string)
+                        NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
                         #endif
                         copied = true
                         
@@ -102,6 +118,13 @@ struct BackupView: View {
             }
             
             Section {
+                TextField("Extra mint URL to scan (optional)", text: $customMintURL)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    #endif
+
                 Button {
                     startScan() // Call helper function
                 } label: {
@@ -121,7 +144,7 @@ struct BackupView: View {
             } header: {
                 Text("Recovery")
             } footer: {
-                Text("This scans the mint for any tokens derived from your seed that are not currently on your device.")
+                Text("Scans every mint this wallet knows (the default mint and any mint you hold funds at) for tokens derived from your seed that are not on this device. If you held funds at another mint before restoring, enter its URL above so it gets scanned too.")
             }
             
             Section {
@@ -152,6 +175,12 @@ struct BackupView: View {
             }
         }
         .navigationTitle("Backup")
+        // Don't leave the 12 words sitting in view/state once the user navigates
+        // away or the app backgrounds — the reveal is a deliberate, momentary act.
+        .onDisappear { hideSeed() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { hideSeed() }
+        }
         .sheet(isPresented: $showImportSheet) {
             ImportWalletView()
         }
@@ -181,8 +210,34 @@ struct BackupView: View {
     }
     
     private func revealSeed() {
-        // In a real app, you would ask for FaceID/TouchID here first!
-        if let phrase = SeedManager.shared.retrieveFromKeychain() {
+        // The seed is total wallet control: require the device owner
+        // (FaceID/TouchID with passcode fallback) before showing it. Without this,
+        // anyone holding the unlocked phone reads the 12 words in two taps.
+        let context = LAContext()
+        var authError: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) else {
+            // No passcode set on the device — nothing to authenticate against.
+            // Reveal (the device itself is unprotected; that is the user's choice).
+            loadAndShowSeed()
+            return
+        }
+        context.evaluatePolicy(.deviceOwnerAuthentication,
+                               localizedReason: "Authenticate to reveal your recovery phrase") { success, _ in
+            guard success else { return }
+            Task { @MainActor in
+                loadAndShowSeed()
+            }
+        }
+    }
+
+    private func hideSeed() {
+        isRevealed = false
+        words = []
+    }
+
+    private func loadAndShowSeed() {
+        // (try? is safe here: a keychain error just means nothing is revealed.)
+        if let phrase = (try? SeedManager.shared.retrieveFromKeychain()) ?? nil {
             self.words = phrase
             withAnimation {
                 isRevealed = true
@@ -190,21 +245,57 @@ struct BackupView: View {
         }
     }
     
+    /// Every mint worth scanning: the default mint, every mint the wallet holds
+    /// proofs at, and an optional user-entered URL (needed on a fresh restore,
+    /// where the wallet doesn't yet know about any second mint). Deduplicated
+    /// ignoring trailing slashes.
+    private func scanTargets() throws -> [URL] {
+        var seen = Set<String>()
+        var targets: [URL] = []
+        func add(_ url: URL) {
+            let key = url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+            if seen.insert(key).inserted { targets.append(url) }
+        }
+
+        add(activeMint)
+        for urlString in wallet.proofsByMint.keys {
+            if let url = URL(string: urlString) { add(url) }
+        }
+
+        let trimmed = customMintURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            guard let url = URL(string: trimmed) else {
+                throw CashuError.protocolError("'\(trimmed)' is not a valid mint URL")
+            }
+            try RealMintAPI.requireSecure(url)   // same https policy as everywhere else
+            add(url)
+        }
+        return targets
+    }
+
     private func startScan() {
         isScanning = true
         Task {
             do {
-                // 1. Call the clean function on Wallet
-                let count = try await wallet.scanForFunds(mint: activeMint)
-                
-                // 2. Handle Success
-                alertMessage = "Restored \(count) tokens!"
-                showAlert = true
+                let targets = try scanTargets()
+                var total = 0
+                var lines: [String] = []
+                // One mint failing (offline, unreachable) must not abort the rest.
+                for mint in targets {
+                    let label = mint.host ?? mint.absoluteString
+                    do {
+                        let count = try await wallet.scanForFunds(mint: mint)
+                        total += count
+                        lines.append("\(label): \(count) restored")
+                    } catch {
+                        lines.append("\(label): scan failed (\(error.localizedDescription))")
+                    }
+                }
+                alertMessage = "Restored \(total) token(s) across \(targets.count) mint(s).\n\n" + lines.joined(separator: "\n")
             } catch {
-                // 3. Handle Error
                 alertMessage = "Error: \(error.localizedDescription)"
-                showAlert = true
             }
+            showAlert = true
             isScanning = false
         }
     }

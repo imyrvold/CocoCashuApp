@@ -66,12 +66,24 @@ struct RestoreView: View {
         
         isRestoring = true
         status = "Saving seed..."
-        
-        // 1. Overwrite Keychain
-        try? SeedManager.shared.saveToKeychain(phrase: words)
-        
-        // 2. Trigger App Reload
-        // In a real app, you might swap the Root View. 
+
+        // 1. Overwrite Keychain. A silent failure here would leave the app running
+        // on the OLD seed while the user believes the new one is active — surface
+        // the error and stop instead.
+        do {
+            try SeedManager.shared.saveToKeychain(phrase: words)
+        } catch {
+            status = "Could not save the seed: \(error.localizedDescription)"
+            isRestoring = false
+            return
+        }
+
+        // 2. Wipe state belonging to the old seed — proofs/counters/history must
+        // not survive a seed swap (wrong balance, wrong derivation counters).
+        CashuBootstrap.resetStateForImportedSeed()
+
+        // 3. Trigger App Reload
+        // In a real app, you might swap the Root View.
         // Here we call the closure to let the parent handle it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             onRestoreSuccess()

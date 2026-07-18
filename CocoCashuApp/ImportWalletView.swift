@@ -51,7 +51,7 @@ struct ImportWalletView: View {
                     performImport()
                 }
             } message: {
-                Text("This will delete the current wallet from this device and replace it with the imported seed. This action cannot be undone.")
+                Text("This will delete the current wallet from this device and replace it with the imported seed. This action cannot be undone. The app will close — reopen it to load the imported wallet.")
             }
         }
     }
@@ -83,12 +83,18 @@ struct ImportWalletView: View {
         do {
             // 1. Overwrite Keychain
             try SeedManager.shared.saveToKeychain(phrase: words)
-            
-            // 2. CRITICAL: Force the user to restart the app.
-            // Why? The 'CocoBlindingEngine' is loaded once at startup. 
-            // It needs to be re-initialized with the NEW seed.
-            errorMessage = "Success! Please fully close (kill) and restart the app to load your restored wallet."
-            
+
+            // 2. Wipe all state belonging to the OLD seed (proofs, counters,
+            // history). Keeping it would show the old balance against the new
+            // seed and keep the old derivation counters.
+            CashuBootstrap.resetStateForImportedSeed()
+
+            // 3. Terminate so next launch rebuilds the engine from the NEW seed.
+            // The running CocoBlindingEngine was initialized with the old seed and
+            // must not keep minting on it while BackupView shows the new phrase.
+            // (Same close-and-relaunch pattern as the reset buttons in BackupView.)
+            exit(0)
+
         } catch {
             errorMessage = "Failed to save to Keychain: \(error.localizedDescription)"
         }

@@ -132,17 +132,26 @@ struct MeltView: View {
         }
         
         do {
-            // 2. Execute Melt
-            // Note: The library function 'spend' creates the melt quote and executes it.
-            try await wallet.manager.mintService.spend(amount: amount, from: mintURL, to: invoice)
-            
-            statusMessage = "Success! Payment sent."
-            isProcessing = false
-            
-            // Auto-close after short delay
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            dismiss()
-            
+            // 2. Execute Melt. `spend` submits the melt and, if the mint reports the
+            // Lightning payment still in flight (PENDING), polls until it settles.
+            let result = try await wallet.manager.mintService.spend(amount: amount, from: mintURL, to: invoice)
+
+            switch result {
+            case .paid:
+                statusMessage = "Success! Payment sent."
+                isProcessing = false
+                // Auto-close after short delay
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                dismiss()
+
+            case .pending:
+                // Accepted but not yet settled — this is NOT a failure. The funds
+                // are held aside and the payment will confirm on its own; the app
+                // reconciles it automatically.
+                statusMessage = "Payment is processing — the mint is still settling it. You can close this; it will confirm automatically."
+                isProcessing = false
+            }
+
         } catch {
             statusMessage = "Failed: \(error.localizedDescription)"
             isProcessing = false
@@ -189,24 +198,34 @@ struct MeltView: View {
         
         // Extract Number
         guard let r1 = Range(match.range(at: 1), in: lower),
-              let r2 = Range(match.range(at: 2), in: lower),
-              let value = Double(lower[r1]) else { return nil }
+              let r2 = Range(match.range(at: 2), in: lower) else { return nil }
         
         let multiplierChar = String(lower[r2])
-        
-        // BOLT11 Multipliers to Satoshis
-        // 1 BTC = 100,000,000 sats
-        
-        var sats: Double = 0
+
+        // BOLT11 Multipliers to Satoshis (1 BTC = 100,000,000 sats), computed in
+        // INTEGER math. The old Double math silently truncated fractional-sat
+        // invoices (lnbc105n = 10.5 sats became "10"), so the app displayed and
+        // attempted an amount that wasn't what the invoice asked. Reject any
+        // invoice that isn't a whole number of sats instead of rounding it.
+        // Note the client parse is only a UI preview — MintService.spend verifies
+        // it against the mint's quoted amount and aborts on mismatch.
+        guard let value = Int64(lower[r1]), value > 0 else { return nil }
+
+        var sats: Int64
         switch multiplierChar {
-        case "m": sats = value * 100_000.0      // milli (0.001 BTC)
-        case "u": sats = value * 100.0          // micro (0.000001 BTC)
-        case "n": sats = value * 0.1            // nano  (0.000000001 BTC) -> 100n = 10 sats
-        case "p": sats = value * 0.0001         // pico  (0.000000000001 BTC)
+        case "m":                                // milli-BTC = 100,000 sats
+            sats = value * 100_000
+        case "u":                                // micro-BTC = 100 sats
+            sats = value * 100
+        case "n":                                // nano-BTC = 0.1 sat → whole sats only for multiples of 10
+            guard value % 10 == 0 else { return nil }
+            sats = value / 10
+        case "p":                                // pico-BTC = 0.0001 sat → multiples of 10,000
+            guard value % 10_000 == 0 else { return nil }
+            sats = value / 10_000
         default: return nil
         }
-        
-        // Return only if it's a valid whole satoshi amount (Cashu doesn't do millisats yet)
-        return sats >= 1 ? Int64(sats) : nil
+
+        return sats >= 1 ? sats : nil
     }
 }

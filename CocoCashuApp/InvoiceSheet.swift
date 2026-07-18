@@ -76,7 +76,13 @@ struct InvoiceSheet: View {
     // 1. Unified Copy Helper
     private func copyToClipboard(_ text: String) {
         #if os(iOS)
-        UIPasteboard.general.string = text
+        // Invoices only route payment TOWARD this wallet, but they still leak
+        // activity — expire them from the pasteboard rather than leaving them
+        // indefinitely for any later app to read.
+        UIPasteboard.general.setItems(
+            [["public.utf8-plain-text": text]],
+            options: [.expirationDate: Date().addingTimeInterval(300)]
+        )
         #elseif os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
