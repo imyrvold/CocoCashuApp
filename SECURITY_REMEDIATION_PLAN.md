@@ -377,6 +377,28 @@ longer be found by "Scan for Lost Funds". Ship before real users rely on seed ba
   (hex v00/v01 only — this wallet can never hold funds under legacy keysets)
   and isolates per-keyset scan errors so one keyset can't kill the rest.
   Regression test `testRestoreKeysetSupportGate`.
+- **NUT-07 endpoint was wrong — restore verification and pending reconciliation
+  never worked** (found during a live iPad seed-restore): the code POSTed raw
+  proofs to `/v1/check`, which does not exist (404 on cashu.cz and Minibits);
+  the real endpoint is `/v1/checkstate` taking `Ys` (hash_to_curve of each
+  secret). The 404 made `verifyUnspent` discard every restored proof ("0
+  restored") and made launch-time `reconcilePending` a silent no-op.
+  `hash_to_curve` hoisted to a shared Core function (`cashu_hash_to_curve` /
+  `cashu_Y_hex`); `check()` now posts Ys to `/v1/checkstate`; both callers match
+  states BY Y instead of positionally — which also closes audit finding L4
+  (reordering-mint hazard). Y computation pinned to the NUT-00 vectors.
+
+### Live end-to-end verification (2026-07-18, real funds)
+- **Seed restore on a fresh device (iPad)**: import 12 words → multi-mint scan →
+  full balance recovered across both mints (C2/H1 proven live).
+- **Pending-proof safety**: a failed melt's 64-sat input sat quarantined as
+  `.pending` for ~5 hours (through the broken /v1/check era) without loss or
+  double-spend; after the checkstate fix, launch reconciliation released it
+  automatically (C5 + NUT-07 proven live).
+- **Melt success path**: two Lightning payments with exact fee accounting and
+  change recovery. **Ecash interop**: send → claimed in Minibits (M11), and
+  V4 receive from Minibits. Remaining untested: macOS build, app-kill
+  mid-operation, cross-mint melt from a non-default mint.
 
 ### Verification status
 `swift test` → 11/11 pass (official NUT-12 DLEQ vector, NUT-13 v00+v01 derivation
