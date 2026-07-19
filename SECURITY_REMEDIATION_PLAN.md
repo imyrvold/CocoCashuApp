@@ -463,3 +463,31 @@ The audit fixes exposed that several bugs lived in the app because domain logic
 **Rebalancing complete** — the library owns money, protocol, persistence, and
 orchestration; the app owns presentation and platform services (biometrics,
 pasteboard, QR, privacy screen).
+
+## Token exchange: QR + NFC
+
+Goal: "tap to exchange ecash" like some Android wallets. Platform reality
+(verified 2026-07): iOS Host Card Emulation is entitlement-gated AND
+EEA-only, so a true iPhone↔iPhone tap is NOT possible — one side would have to
+emulate a tag. What was built instead:
+
+- **V4 (cashuB) sending** — `TokenV4Helper.serialize` (minimal CBOR encoder in
+  Core), byte-exact against the official NUT-00 V4 vector; `TokenVersion` param
+  threaded through `MintService.createToken`/`swap`. Send now emits V4 (compact
+  for QR/NFC; modern wallets read it). We already received V4.
+- **QR in the send sheet** (`TokenQRView`) — the practical iPhone↔iPhone path:
+  recipient scans with their wallet camera. No entitlement needed.
+- **NFC receive + write to card** (`NFCService`, iOS) — read a token from an
+  NFC card or an Android HCE wallet; write a token onto a writable NDEF card
+  (offline bearer "Cashu card"). Uses `NFCNDEFReaderSession` (standard tag
+  capability, not the gated HCE one). Capacity-checked writes, cashu-prefix
+  validation on reads, graceful no-op when NFC is unavailable.
+
+**Action required before NFC works on device:** in Xcode → Signing &
+Capabilities, add **"Near Field Communication Tag Reading"** (generates the
+`com.apple.developer.nfc.readersession.formats` entitlement; also needs the App
+ID to carry the NFC capability). The `NFCReaderUsageDescription` Info.plist key
+is already set via build setting. NFC UI is gated on
+`NFCNDEFReaderSession.readingAvailable`, so it stays hidden on the Simulator and
+on devices without the capability. **Not yet tested on hardware** — needs a
+physical NFC card (NTAG215/216) and a device build with the capability enabled.

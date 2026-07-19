@@ -34,6 +34,9 @@ struct WalletView: View {
     // over-sized bearer token.
     @State private var sendAmountString = ""
     @State private var showDiscardTokenConfirm = false
+#if os(iOS)
+    @State private var nfc = NFCService()
+#endif
     
     @State private var showingMelt = false
     @State private var showBackup = false
@@ -307,15 +310,31 @@ struct WalletView: View {
                 // Result State
                 Image(systemName: "checkmark.circle.fill").font(.largeTitle).foregroundStyle(.green)
                 Text("Token Created!").font(.headline)
-                
+
+                // QR is the iPhone-to-iPhone hand-off: the recipient scans it
+                // with their wallet camera. (V4/cashuB keeps it compact.)
+                TokenQRView(content: token, size: 200)
+                    .privacySensitive()
+
                 Text(token)
                     .font(.caption2)
                     .monospaced()
-                    .lineLimit(3)
-                    .padding()
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .padding(8)
                     .background(Color.gray.opacity(0.1))
                     .cornerRadius(8)
                     .privacySensitive()
+
+#if os(iOS)
+                if NFCService.isAvailable {
+                    Button {
+                        writeTokenToCard(token)
+                    } label: {
+                        Label("Write to NFC card", systemImage: "wave.3.right")
+                    }
+                }
+#endif
 
                 Button("Copy to Clipboard") {
 #if os(macOS)
@@ -377,25 +396,36 @@ struct WalletView: View {
         .padding()
         .frame(minWidth: 300, minHeight: 300)
 #if os(iOS)
-        .presentationDetents([.height(250)])
+        .presentationDetents(tokenToShare == nil ? [.height(250)] : [.large])
 #endif
     }
-    
+
     private var receiveEcashSheet: some View {
         VStack(spacing: 20) {
             Text("Receive Ecash").font(.headline)
-            Text("Paste a Cashu token (cashuA...)")
+            Text("Paste a Cashu token, or tap an NFC card.")
                 .foregroundStyle(.secondary)
-            
+
             TextEditor(text: $tokenInput)
                 .frame(height: 100)
                 .border(Color.gray.opacity(0.2))
                 .padding(.horizontal)
-            
+
             if isProcessingEcash { ProgressView() }
             if let err = ecashError {
                 Text(err).foregroundStyle(.red).font(.caption)
             }
+
+#if os(iOS)
+            if NFCService.isAvailable {
+                Button {
+                    receiveViaNFC()
+                } label: {
+                    Label("Receive via NFC", systemImage: "wave.3.right")
+                }
+                .disabled(isProcessingEcash)
+            }
+#endif
 
             Button("Claim Token") {
                 claimToken()
@@ -406,7 +436,7 @@ struct WalletView: View {
         .padding()
         .frame(minWidth: 300, minHeight: 300)
 #if os(iOS)
-        .presentationDetents([.height(250)])
+        .presentationDetents([.height(320)])
 #endif
     }
     
@@ -431,10 +461,9 @@ struct WalletView: View {
                 // 2. Select Proofs to Spend from that mint
                 let unspent = wallet.proofsByMint[mint.absoluteString]?.filter { $0.state == .unspent } ?? []
                 
-                // 2. Perform Swap via MintService
-                // We ask the service to swap our inputs for: [Target Amount] + [Change]
-                // The service returns the serialized token string for the Target Amount.
-                let result = try await wallet.manager.mintService.swap(proofs: unspent, amount: amt, mint: mint)
+                // 2. Perform Swap via MintService. Emit V4 (cashuB) — compact for
+                // QR codes and NFC cards; modern wallets read it.
+                let result = try await wallet.manager.mintService.swap(proofs: unspent, amount: amt, mint: mint, tokenVersion: .v4)
                 
                 await MainActor.run {
                     self.tokenToShare = result.token // The serialized token string
@@ -487,6 +516,38 @@ struct WalletView: View {
             }
         }
     }
+
+#if os(iOS)
+    /// Read a token from an NFC card (or an Android wallet acting as a tag) into
+    /// the input field, then run the normal claim path.
+    private func receiveViaNFC() {
+        ecashError = nil
+        nfc.readToken(
+            onToken: { token in
+                tokenInput = token
+                claimToken()
+            },
+            onError: { message in
+                ecashError = message
+            }
+        )
+    }
+
+    /// Write the created token onto a writable NFC card (an offline bearer card).
+    private func writeTokenToCard(_ token: String) {
+        ecashError = nil
+        nfc.writeToken(
+            token,
+            onSuccess: {
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+            },
+            onError: { message in
+                ecashError = message
+            }
+        )
+    }
+#endif
 }
 
 // MARK: - Subviews & Structs
