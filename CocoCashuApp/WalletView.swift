@@ -34,6 +34,7 @@ struct WalletView: View {
     // over-sized bearer token.
     @State private var sendAmountString = ""
     @State private var showDiscardTokenConfirm = false
+    @State private var showTokenScanner = false
 #if os(iOS)
     @State private var nfc = NFCService()
 #endif
@@ -417,13 +418,23 @@ struct WalletView: View {
             }
 
 #if os(iOS)
-            if NFCService.isAvailable {
+            HStack {
                 Button {
-                    receiveViaNFC()
+                    showTokenScanner = true
                 } label: {
-                    Label("Receive via NFC", systemImage: "wave.3.right")
+                    Label("Scan QR", systemImage: "qrcode.viewfinder")
                 }
                 .disabled(isProcessingEcash)
+
+                if NFCService.isAvailable {
+                    Spacer()
+                    Button {
+                        receiveViaNFC()
+                    } label: {
+                        Label("Receive via NFC", systemImage: "wave.3.right")
+                    }
+                    .disabled(isProcessingEcash)
+                }
             }
 #endif
 
@@ -436,7 +447,16 @@ struct WalletView: View {
         .padding()
         .frame(minWidth: 300, minHeight: 300)
 #if os(iOS)
-        .presentationDetents([.height(320)])
+        .presentationDetents([.height(360)])
+        .sheet(isPresented: $showTokenScanner) {
+            QRScannerView(isPresenting: $showTokenScanner) { scanned in
+                // Some wallets encode the token as a `cashu:` URI; strip the scheme.
+                let token = scanned.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "cashu:", with: "", options: .caseInsensitive)
+                tokenInput = token
+                claimToken()
+            }
+        }
 #endif
     }
     

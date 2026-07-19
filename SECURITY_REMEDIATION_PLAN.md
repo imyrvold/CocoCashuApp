@@ -475,8 +475,15 @@ emulate a tag. What was built instead:
   Core), byte-exact against the official NUT-00 V4 vector; `TokenVersion` param
   threaded through `MintService.createToken`/`swap`. Send now emits V4 (compact
   for QR/NFC; modern wallets read it). We already received V4.
-- **QR in the send sheet** (`TokenQRView`) — the practical iPhone↔iPhone path:
-  recipient scans with their wallet camera. No entitlement needed.
+- **QR send + receive** — the send sheet shows the token as a QR (`TokenQRView`)
+  and the receive sheet has a camera **scanner** (`QRScannerView`, shared with
+  the melt-invoice flow) that feeds the scanned string into the claim path
+  (strips a `cashu:` URI scheme if present). This is the full card-free,
+  entitlement-free iPhone↔iPhone hand-off: A shows QR → B scans → claims. It's
+  also the ONLY viable direct two-iPhone path — verified against cashu.me's own
+  source, whose NFC uses the Web NFC API (`NDEFReader`), which iOS/Safari does
+  not implement, so cashu.me has no iOS NFC at all; our native CoreNFC card
+  path is actually ahead of it on iOS.
 - **NFC receive + write to card** (`NFCService`, iOS) — read a token from an
   NFC card or an Android HCE wallet; write a token onto a writable NDEF card
   (offline bearer "Cashu card"). Uses `NFCNDEFReaderSession` (standard tag
