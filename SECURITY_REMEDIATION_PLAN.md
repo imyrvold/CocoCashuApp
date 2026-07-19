@@ -483,11 +483,24 @@ emulate a tag. What was built instead:
   capability, not the gated HCE one). Capacity-checked writes, cashu-prefix
   validation on reads, graceful no-op when NFC is unavailable.
 
-**Action required before NFC works on device:** in Xcode → Signing &
-Capabilities, add **"Near Field Communication Tag Reading"** (generates the
-`com.apple.developer.nfc.readersession.formats` entitlement; also needs the App
-ID to carry the NFC capability). The `NFCReaderUsageDescription` Info.plist key
-is already set via build setting. NFC UI is gated on
-`NFCNDEFReaderSession.readingAvailable`, so it stays hidden on the Simulator and
-on devices without the capability. **Not yet tested on hardware** — needs a
-physical NFC card (NTAG215/216) and a device build with the capability enabled.
+**Capability (done):** the "Near Field Communication Tag Reading" capability is
+enabled — `CocoCashuApp.entitlements` declares
+`com.apple.developer.nfc.readersession.formats = [NDEF, TAG]` (PACE deliberately
+omitted; this wallet never reads PACE-protected eIDs). This required switching
+to the **paid** Apple Developer team — NFC Tag Reading is not available to a free
+Personal Team (the capability simply doesn't appear in Xcode's list). The
+`NFCReaderUsageDescription` Info.plist key is set via build setting. NFC UI is
+gated on `NFCNDEFReaderSession.readingAvailable`, so it stays hidden on the
+Simulator and would degrade to a no-op if the capability were absent.
+
+**Still untested on hardware:** the read/write round trip needs a physical
+writable tag (NTAG215 = 504 B / NTAG216 = 888 B; NTAG213's ~144 B may be too
+small for multi-proof tokens). Test loop: create token → "Write to NFC card" →
+tap card → Receive → "Receive via NFC" → tap same card → confirm it claims.
+NFC is device-only; Simulator and CLI builds can't exercise it.
+
+### Live-verified (real funds, this arc)
+Beyond the audit's fund guarantees: successful melts with change recovery, V3
+and V4 two-way ecash interop with Minibits, cross-mint receive, multi-mint
+balance/scan, and full seed-restore recovery on a fresh device. **QR send/receive
+and the NFC card round trip are the remaining paths to confirm on-device.**
