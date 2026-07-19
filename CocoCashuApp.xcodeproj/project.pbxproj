@@ -226,7 +226,7 @@
 			mainGroup = F687B95F2EA3EE83009B1492;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F697CDA22FDF0EC000BAF63A /* XCLocalSwiftPackageReference "../CocoCashuSwift" */,
+				F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F687B9692EA3EE83009B1492 /* Products */;
@@ -676,44 +676,56 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		F697CDA22FDF0EC000BAF63A /* XCLocalSwiftPackageReference "../CocoCashuSwift" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../CocoCashuSwift;
+/* Begin XCRemoteSwiftPackageReference section */
+		F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/imyrvold/CocoCashuSwift.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
 		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		F617F7B12EFE6024000B350E /* CocoCashuCore */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuCore;
 		};
 		F617F7B32EFE6024000B350E /* CocoCashuUI */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuUI;
 		};
 		F617F7BF2EFEC263000B350E /* CocoCashuCore */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuCore;
 		};
 		F617F7C12EFEC263000B350E /* CocoCashuUI */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuUI;
 		};
 		F687B9932EA3EF18009B1492 /* CocoCashuCore */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuCore;
 		};
 		F687B9952EA3EF18009B1492 /* CocoCashuUI */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuUI;
 		};
 		F697CDA32FDF0EC000BAF63A /* CocoCashuCore */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuCore;
 		};
 		F697CDA52FDF0EC000BAF63A /* CocoCashuUI */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = F697CDA22FDF0EC000BAF63A /* XCRemoteSwiftPackageReference "CocoCashuSwift" */;
 			productName = CocoCashuUI;
 		};
 /* End XCSwiftPackageProductDependency section */

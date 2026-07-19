@@ -1,5 +1,5 @@
 {
-  "originHash" : "4c9b504a5522c712b53b7d1f6ba7fa1135797ddb9832c8888137bda3cf121055",
+  "originHash" : "25e4a9d9b17402ed9d37cad51472cd472c4ba5e00b4b50a31f90d7c168bf8196",
   "pins" : [
     {
       "identity" : "bip39",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "e79bd90275e50643cf8f97208ffa536d0def3ec7",
         "version" : "1.0.1"
+      }
+    },
+    {
+      "identity" : "cococashuswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/imyrvold/CocoCashuSwift.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "e90939647f81803504c3dad257548ef04480112d"
       }
     },
     {
