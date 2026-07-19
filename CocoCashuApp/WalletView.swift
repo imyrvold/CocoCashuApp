@@ -58,7 +58,7 @@ struct WalletView: View {
                         // mint (e.g. Minibits) stores its proofs under that mint,
                         // and showing only the default mint made those funds
                         // invisible even though they were safely received.
-                        (Text("\(totalBalance)")
+                        (Text("\(wallet.totalBalance)")
                             .font(.system(size: 48, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                         + Text(" sats")
@@ -68,10 +68,10 @@ struct WalletView: View {
 
                         // Per-mint breakdown when funds live at more than one mint,
                         // so it's clear where the money actually is.
-                        let breakdown = mintBalances
+                        let breakdown = wallet.mintBalances
                         if breakdown.count > 1 {
                             VStack(spacing: 2) {
-                                ForEach(breakdown, id: \.host) { entry in
+                                ForEach(breakdown) { entry in
                                     Text("\(entry.host): \(entry.balance) sats")
                                         .font(.caption)
                                         .foregroundStyle(.white.opacity(0.8))
@@ -296,28 +296,8 @@ struct WalletView: View {
         }
     }
     
-    private func balance(for mint: URL) -> Int64 {
-        let proofs = wallet.proofsByMint[mint.absoluteString] ?? []
-        return proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
-    }
-
-    /// Unspent balance summed across every mint the wallet holds proofs at.
-    private var totalBalance: Int64 {
-        wallet.proofsByMint.values.reduce(0) { total, proofs in
-            total + proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
-        }
-    }
-
-    /// Per-mint balances (host name + sats), largest first, zero-balance mints omitted.
-    private var mintBalances: [(host: String, balance: Int64, url: String)] {
-        wallet.proofsByMint.compactMap { (urlString, proofs) in
-            let bal = proofs.filter { $0.state == .unspent }.map(\.amount).reduce(0, +)
-            guard bal > 0 else { return nil }
-            let host = URL(string: urlString)?.host ?? urlString
-            return (host: host, balance: bal, url: urlString)
-        }
-        .sorted { $0.balance > $1.balance }
-    }
+    // Balance math and per-mint breakdown live in ObservableWallet
+    // (wallet.totalBalance / wallet.mintBalances); this view only renders them.
     
     private var sendEcashSheet: some View {
         VStack(spacing: 20) {
@@ -438,12 +418,13 @@ struct WalletView: View {
         
         Task {
             do {
-                // 1. Pick a mint that can cover the amount (largest balance first).
-                // A Cashu token spends proofs from ONE mint; hardcoding the default
-                // mint made funds received at other mints (e.g. Minibits) unsendable
-                // even though the total balance covered the amount.
-                guard let source = mintBalances.first(where: { $0.balance >= amt }),
-                      let mint = URL(string: source.url) else {
+                // 1. Pick a mint that can cover the amount (library logic — a
+                // Cashu token spends proofs from ONE mint, so a sufficient total
+                // across mints is not enough).
+                let mint: URL
+                do {
+                    mint = try await wallet.manager.selectMint(covering: amt)
+                } catch {
                     throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "No single mint holds enough balance for \(amt) sats. Tokens can only be created from one mint at a time."])
                 }
 

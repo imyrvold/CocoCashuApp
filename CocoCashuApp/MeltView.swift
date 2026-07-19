@@ -116,16 +116,12 @@ struct MeltView: View {
         isProcessing = true
         statusMessage = "Processing..."
         
-        // 1. Find a mint with enough balance
-        // Logic: Pick the mint with the largest balance for simplicity
-        // (A real app might define "smart routing" or let the user pick)
-        guard let bestMint = wallet.proofsByMint
-            .map({ (url: $0.key, bal: $0.value.map(\.amount).reduce(0, +)) })
-            .sorted(by: { $0.bal > $1.bal })
-            .first,
-              let mintURL = URL(string: bestMint.url),
-              bestMint.bal >= amount else {
-            
+        // 1. Find a mint with enough balance (library logic: largest balance
+        // that covers the amount — a melt spends proofs from ONE mint).
+        let mintURL: URL
+        do {
+            mintURL = try await wallet.manager.selectMint(covering: amount)
+        } catch {
             statusMessage = "Insufficient funds in any single mint."
             isProcessing = false
             return

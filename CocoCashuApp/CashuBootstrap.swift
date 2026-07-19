@@ -15,7 +15,9 @@ enum CashuBootstrap {
       // is excluded from backups before the repository opens its file inside it.
     let proofRepo = FileProofRepository(url: storeURL())
     let quoteRepo = InMemoryQuoteRepository()
-    let mintRepo  = InMemoryMintRepository()
+    // Persistent mint registry: multi-mint operations (scan-all, reconcile-all)
+    // must know a mint even when no proofs currently sit there.
+    let mintRepo  = FileMintRepository(url: mintsStoreURL())
     // Persistent NUT-13 derivation counter: survives restarts so deterministic
     // secrets are never reused and minted proofs stay restorable from the seed.
     let counterRepo = FileCounterRepository(url: counterStoreURL())
@@ -67,10 +69,12 @@ enum CashuBootstrap {
       // 6. Refresh
     await wallet.refreshAll()
 
-      // 7. Reconcile any melt left `.pending` by a prior ambiguous failure or app
-      //    kill (NUT-07 checkstate), then refresh so resolved proofs reflect in the
-      //    balance. Best-effort: if the mint is unreachable, they stay pending.
-      try? await manager.mintService.reconcilePending(mint: defaultMint)
+      // 7. Register the default mint, then reconcile any proofs left `.pending`
+      //    by a prior ambiguous failure or app kill (NUT-07 checkstate) at EVERY
+      //    mint that holds them — a pending melt at a secondary mint must resolve
+      //    too. Best-effort: unreachable mints leave their proofs pending.
+      await manager.registerMint(defaultMint)
+      await manager.reconcileAllPending()
       await wallet.refreshAll()
 
     return wallet
@@ -106,6 +110,10 @@ enum CashuBootstrap {
     storeURL().deletingLastPathComponent().appendingPathComponent("history.json")
   }
 
+  private static func mintsStoreURL() -> URL {
+    storeURL().deletingLastPathComponent().appendingPathComponent("mints.json")
+  }
+
   // MARK: - Reset
 
   /// Clears the stored balance only. Keeps the seed AND the NUT-13 counter, so
@@ -124,6 +132,7 @@ enum CashuBootstrap {
     try? FileManager.default.removeItem(at: storeURL())
     try? FileManager.default.removeItem(at: counterStoreURL())
     try? FileManager.default.removeItem(at: historyStoreURL())
+    try? FileManager.default.removeItem(at: mintsStoreURL())
     SeedManager.shared.deleteFromKeychain()
   }
 
@@ -136,6 +145,10 @@ enum CashuBootstrap {
     try? FileManager.default.removeItem(at: storeURL())
     try? FileManager.default.removeItem(at: counterStoreURL())
     try? FileManager.default.removeItem(at: historyStoreURL())
+    // Keep mints.json: known mints aren't seed-specific, and the imported
+    // seed's funds are most likely at those same mints — keeping them makes
+    // the post-import "Scan for Lost Funds" find everything without the user
+    // re-entering mint URLs.
   }
 }
 

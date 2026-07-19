@@ -433,13 +433,22 @@ The audit fixes exposed that several bugs lived in the app because domain logic
   longer be misread as e.g. "1 milli-BTC". Still a preview-only parse — the
   mint's melt quote remains authoritative.
 
+- **Multi-mint orchestration → library, backed by `MintRepository`.** Done.
+  `FileMintRepository` (mints.json, same persistence guarantees) brings the
+  previously-dead registry to life; mints are registered on bootstrap (default)
+  and on receive/successful scan. `CashuManager+MultiMint` exposes
+  `registerMint`, `knownMints` (registry ∪ mints of stored proofs),
+  `balances()`, `selectMint(covering:)` (pure `MintSelection.pick` — largest
+  single balance covering the amount; total-across-mints is deliberately not
+  enough), `scanAllMints(extra:)` with per-mint failure isolation, and
+  `reconcileAllPending()` (NUT-07 at EVERY mint holding pending proofs — the
+  bootstrap previously reconciled only the default mint, a latent gap).
+  `ObservableWallet` gained `totalBalance`/`mintBalances` display state and a
+  `scanAllMints(extraMintString:)` wrapper. WalletView/MeltView/BackupView now
+  only render; mint selection and the scan loop left the UI. Seed import keeps
+  mints.json (mints aren't seed-specific; the post-import scan then finds funds
+  without re-entering URLs). Tests: selection/dedupe/registry round-trip.
+
 ### Candidate follow-ups (identified, not yet done)
-- **Multi-mint orchestration → library, backed by `MintRepository`.** The
-  `MintRepository` is injected through `CashuManager` but only referenced in an
-  empty `syncMints()` hook — effectively dead. The app infers known mints from
-  `proofsByMint.keys` and runs the scan-all-mints loop and cross-mint coin
-  selection in the UI (`WalletView.mintBalances`, `BackupView.scanTargets`).
-  Populate `MintRepository` for real and expose `scanAllMints()` / coin selection
-  as library methods.
 - **Bootstrap wiring → a library factory** (e.g. `CashuWallet.makeDefault(mint:storageURL:)`),
   leaving the app to supply only the mint URL and storage location.

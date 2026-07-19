@@ -245,53 +245,23 @@ struct BackupView: View {
         }
     }
     
-    /// Every mint worth scanning: the default mint, every mint the wallet holds
-    /// proofs at, and an optional user-entered URL (needed on a fresh restore,
-    /// where the wallet doesn't yet know about any second mint). Deduplicated
-    /// ignoring trailing slashes.
-    private func scanTargets() throws -> [URL] {
-        var seen = Set<String>()
-        var targets: [URL] = []
-        func add(_ url: URL) {
-            let key = url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
-            if seen.insert(key).inserted { targets.append(url) }
-        }
-
-        add(activeMint)
-        for urlString in wallet.proofsByMint.keys {
-            if let url = URL(string: urlString) { add(url) }
-        }
-
-        let trimmed = customMintURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            guard let url = URL(string: trimmed) else {
-                throw CashuError.protocolError("'\(trimmed)' is not a valid mint URL")
-            }
-            try RealMintAPI.requireSecure(url)   // same https policy as everywhere else
-            add(url)
-        }
-        return targets
-    }
-
     private func startScan() {
         isScanning = true
         Task {
             do {
-                let targets = try scanTargets()
-                var total = 0
-                var lines: [String] = []
-                // One mint failing (offline, unreachable) must not abort the rest.
-                for mint in targets {
-                    let label = mint.host ?? mint.absoluteString
-                    do {
-                        let count = try await wallet.scanForFunds(mint: mint)
-                        total += count
-                        lines.append("\(label): \(count) restored")
-                    } catch {
-                        lines.append("\(label): scan failed (\(error.localizedDescription))")
+                // The library scans every known mint (registry + mints holding
+                // proofs) plus the optional user-entered URL, with per-mint
+                // failure isolation. This view only renders the outcomes.
+                let outcomes = try await wallet.scanAllMints(extraMintString: customMintURL)
+                let total = outcomes.compactMap(\.restored).reduce(0, +)
+                let lines = outcomes.map { o in
+                    let label = o.mint.host ?? o.mint.absoluteString
+                    if let count = o.restored {
+                        return "\(label): \(count) restored"
                     }
+                    return "\(label): scan failed (\(o.errorDescription ?? "unknown error"))"
                 }
-                alertMessage = "Restored \(total) token(s) across \(targets.count) mint(s).\n\n" + lines.joined(separator: "\n")
+                alertMessage = "Restored \(total) token(s) across \(outcomes.count) mint(s).\n\n" + lines.joined(separator: "\n")
             } catch {
                 alertMessage = "Error: \(error.localizedDescription)"
             }
