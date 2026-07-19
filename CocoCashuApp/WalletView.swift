@@ -499,9 +499,15 @@ struct WalletView: View {
     }
     
     private func claimToken() {
+        // Re-entrancy guard: the QR scanner and NFC callbacks call this directly
+        // (bypassing the button's disabled state), so a rapid double-fire could
+        // otherwise launch two claims of the same token — the second races the
+        // first and fails with "already spent" once the first swap lands.
+        guard !isProcessingEcash else { return }
+
         let cleanToken = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanToken.isEmpty else { return }
-        
+
         isProcessingEcash = true
         ecashError = nil
         

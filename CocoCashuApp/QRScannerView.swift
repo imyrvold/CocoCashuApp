@@ -21,19 +21,26 @@ struct QRScannerView: UIViewControllerRepresentable {
     // MARK: - Coordinator (The Bridge)
     class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         let parent: QRScannerView
+        // The delegate fires once per camera frame; without this the same code
+        // would be delivered many times, invoking the caller's handler (e.g.
+        // claimToken) repeatedly — a duplicate claim that races the first.
+        private var didFind = false
 
         init(parent: QRScannerView) {
             self.parent = parent
         }
 
         func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+            guard !didFind else { return }
             if let metadataObject = metadataObjects.first {
                 guard let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject else { return }
                 guard let stringValue = readableObject.stringValue else { return }
-                
+
+                didFind = true
+
                 // Found a code! Audio feedback
                 AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
-                
+
                 // Stop scanning and pass back
                 parent.foundCode(stringValue)
                 parent.isPresenting = false
