@@ -449,6 +449,17 @@ The audit fixes exposed that several bugs lived in the app because domain logic
   mints.json (mints aren't seed-specific; the post-import scan then finds funds
   without re-entering URLs). Tests: selection/dedupe/registry round-trip.
 
-### Candidate follow-ups (identified, not yet done)
-- **Bootstrap wiring → a library factory** (e.g. `CashuWallet.makeDefault(mint:storageURL:)`),
-  leaving the app to supply only the mint URL and storage location.
+- **Bootstrap wiring → a library factory.** Done. `WalletStorage` (Core) owns
+  the on-disk layout (proofs/counters/history/mints in one backup-excluded
+  directory) and the reset semantics (full reset removes everything incl. the
+  registry; imported-seed reset keeps the registry), replacing the path logic
+  that was duplicated between the app and `HistoryService` (whose path is now
+  injected via `CashuManager(historyURL:)`). `CashuWalletFactory.makeWallet(defaultMint:storage:)`
+  (CocoCashuUI) assembles repositories, seed (fail-closed keychain handling),
+  engine, and launch reconciliation. `CashuBootstrap` is ~45 lines: the default
+  mint constant, the storage location, and thin reset wrappers. A second
+  front-end (macOS app, CLI) can now get a full wallet in one call.
+
+**Rebalancing complete** — the library owns money, protocol, persistence, and
+orchestration; the app owns presentation and platform services (biometrics,
+pasteboard, QR, privacy screen).
