@@ -181,51 +181,10 @@ struct MeltView: View {
     
     // MARK: - Simple BOLT11 Decoder Helper
     
-    /// Extract amount in Satoshis from a BOLT11 string (Regex)
+    /// Amount preview from the invoice string. The decoder lives in
+    /// CocoCashuCore (`BOLT11.amountSats`) with test vectors; MintService.spend
+    /// still verifies the amount against the mint's quote and aborts on mismatch.
     private func decodeAmount(from invoice: String) -> Int64? {
-        let lower = invoice.lowercased()
-        guard lower.hasPrefix("ln") else { return nil }
-        
-        // Regex to find the "Amount" section (e.g. lnbc100n...)
-        // Structure: "ln" + (network: bc/tb/crt) + (amount_number) + (multiplier) + ...
-        // Example: lnbc100n... -> 100 nano
-        
-        let pattern = "^ln[a-z]+(\\d+)([pnum])"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        
-        let range = NSRange(location: 0, length: lower.utf16.count)
-        guard let match = regex.firstMatch(in: lower, range: range) else { return nil }
-        
-        // Extract Number
-        guard let r1 = Range(match.range(at: 1), in: lower),
-              let r2 = Range(match.range(at: 2), in: lower) else { return nil }
-        
-        let multiplierChar = String(lower[r2])
-
-        // BOLT11 Multipliers to Satoshis (1 BTC = 100,000,000 sats), computed in
-        // INTEGER math. The old Double math silently truncated fractional-sat
-        // invoices (lnbc105n = 10.5 sats became "10"), so the app displayed and
-        // attempted an amount that wasn't what the invoice asked. Reject any
-        // invoice that isn't a whole number of sats instead of rounding it.
-        // Note the client parse is only a UI preview — MintService.spend verifies
-        // it against the mint's quoted amount and aborts on mismatch.
-        guard let value = Int64(lower[r1]), value > 0 else { return nil }
-
-        var sats: Int64
-        switch multiplierChar {
-        case "m":                                // milli-BTC = 100,000 sats
-            sats = value * 100_000
-        case "u":                                // micro-BTC = 100 sats
-            sats = value * 100
-        case "n":                                // nano-BTC = 0.1 sat → whole sats only for multiples of 10
-            guard value % 10 == 0 else { return nil }
-            sats = value / 10
-        case "p":                                // pico-BTC = 0.0001 sat → multiples of 10,000
-            guard value % 10_000 == 0 else { return nil }
-            sats = value / 10_000
-        default: return nil
-        }
-
-        return sats >= 1 ? sats : nil
+        BOLT11.amountSats(from: invoice)
     }
 }

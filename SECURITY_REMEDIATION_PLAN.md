@@ -425,10 +425,15 @@ The audit fixes exposed that several bugs lived in the app because domain logic
   `CashuBootstrap` shrank from ~224 to ~150 lines (no save loop, no restore, no
   `StoredProof`). Covered by four new persistence tests.
 
+- **BOLT11 amount decoding → library (`BOLT11.amountSats`).** Moved out of
+  `MeltView` into Core with test vectors (all multipliers, fractional-sat
+  rejection, testnet prefix, non-invoices). Hardened while moving: the regex now
+  requires the bech32 `1` separator after the multiplier, so an AMOUNTLESS
+  invoice (`lnbc1<data>`) whose data begins with a multiplier letter can no
+  longer be misread as e.g. "1 milli-BTC". Still a preview-only parse — the
+  mint's melt quote remains authoritative.
+
 ### Candidate follow-ups (identified, not yet done)
-- **BOLT11 amount decoding → library.** Still in `MeltView.decodeAmount`
-  (pure, testable, previously duplicated + had a truncation bug). Move to `Core`
-  with vectors.
 - **Multi-mint orchestration → library, backed by `MintRepository`.** The
   `MintRepository` is injected through `CashuManager` but only referenced in an
   empty `syncMints()` hook — effectively dead. The app infers known mints from
