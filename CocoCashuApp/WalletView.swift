@@ -36,6 +36,9 @@ struct WalletView: View {
     @State private var showDiscardTokenConfirm = false
     @State private var showTokenScanner = false
     @State private var showRequestCreator = false
+    // nil = automatic (largest-balance mint covering the amount); otherwise the
+    // chosen mint's URL string, to send from a specific mint.
+    @State private var selectedMintURL: String?
 #if os(iOS)
     @State private var nfc = NFCService()
 #endif
@@ -383,6 +386,20 @@ struct WalletView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 150)
 
+                // Mint picker: a token spends from ONE mint. Default "Automatic"
+                // uses the largest-balance mint that covers the amount; pick a
+                // specific one to match a recipient who only trusts that mint.
+                let mints = wallet.mintBalances
+                if mints.count > 1 {
+                    Picker("From mint", selection: $selectedMintURL) {
+                        Text("Automatic").tag(String?.none)
+                        ForEach(mints) { m in
+                            Text("\(m.host) (\(m.balance))").tag(String?.some(m.url))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
                 if isProcessingEcash { ProgressView() }
                 if let err = ecashError {
                     Text(err).foregroundStyle(.red).font(.caption)
@@ -398,7 +415,7 @@ struct WalletView: View {
         .padding()
         .frame(minWidth: 300, minHeight: 300)
 #if os(iOS)
-        .presentationDetents(tokenToShare == nil ? [.height(250)] : [.large])
+        .presentationDetents(tokenToShare == nil ? [.height(300)] : [.large])
 #endif
     }
 
@@ -478,16 +495,27 @@ struct WalletView: View {
         isProcessingEcash = true
         ecashError = nil
         
+        // Capture the picker choice before hopping to the background task.
+        let chosenMintURL = selectedMintURL
+
         Task {
             do {
-                // 1. Pick a mint that can cover the amount (library logic — a
-                // Cashu token spends proofs from ONE mint, so a sufficient total
-                // across mints is not enough).
+                // 1. Pick the mint. A Cashu token spends proofs from ONE mint. If
+                // the user chose a specific mint, honor it (and check it covers the
+                // amount); otherwise auto-pick the largest-balance covering mint.
                 let mint: URL
-                do {
-                    mint = try await wallet.manager.selectMint(covering: amt)
-                } catch {
-                    throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "No single mint holds enough balance for \(amt) sats. Tokens can only be created from one mint at a time."])
+                if let chosen = chosenMintURL, let chosenURL = URL(string: chosen) {
+                    let balance = wallet.proofsByMint[chosen]?.filter { $0.state == .unspent }.map(\.amount).reduce(0, +) ?? 0
+                    guard balance >= amt else {
+                        throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "That mint only holds \(balance) sats — not enough for \(amt)."])
+                    }
+                    mint = chosenURL
+                } else {
+                    do {
+                        mint = try await wallet.manager.selectMint(covering: amt)
+                    } catch {
+                        throw NSError(domain: "Wallet", code: -1, userInfo: [NSLocalizedDescriptionKey: "No single mint holds enough balance for \(amt) sats. Tokens can only be created from one mint at a time."])
+                    }
                 }
 
                 // 2. Select Proofs to Spend from that mint
