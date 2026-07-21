@@ -1,33 +1,33 @@
 {
-  "originHash" : "25e4a9d9b17402ed9d37cad51472cd472c4ba5e00b4b50a31f90d7c168bf8196",
-  "pins" : [
+  "originHash": "25e4a9d9b17402ed9d37cad51472cd472c4ba5e00b4b50a31f90d7c168bf8196",
+  "pins": [
     {
-      "identity" : "bip39",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pengpengliu/BIP39",
-      "state" : {
-        "revision" : "e79bd90275e50643cf8f97208ffa536d0def3ec7",
-        "version" : "1.0.1"
+      "identity": "bip39",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pengpengliu/BIP39",
+      "state": {
+        "revision": "e79bd90275e50643cf8f97208ffa536d0def3ec7",
+        "version": "1.0.1"
       }
     },
     {
-      "identity" : "cococashuswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/imyrvold/CocoCashuSwift.git",
-      "state" : {
-        "revision" : "e90939647f81803504c3dad257548ef04480112d",
-        "version" : "0.1.0"
+      "identity": "cococashuswift",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/imyrvold/CocoCashuSwift.git",
+      "state": {
+        "revision": "aca86e448c55ae451fe7623303c0f2e92199a9e5",
+        "version": "0.2.0"
       }
     },
     {
-      "identity" : "secp256k1.swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/GigaBitcoin/secp256k1.swift",
-      "state" : {
-        "revision" : "dcbf99a591ca320ba44e8fc5ae8eeb960589417f",
-        "version" : "0.2.0"
+      "identity": "secp256k1.swift",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/GigaBitcoin/secp256k1.swift",
+      "state": {
+        "revision": "dcbf99a591ca320ba44e8fc5ae8eeb960589417f",
+        "version": "0.2.0"
       }
     }
   ],
-  "version" : 3
+  "version": 3
 }

@@ -490,6 +490,30 @@ emulate a tag. What was built instead:
   capability, not the gated HCE one). Capacity-checked writes, cashu-prefix
   validation on reads, graceful no-op when NFC is unavailable.
 
+### NUT-18 payment requests (tap-to-pay), added after studying cashubtc/wallet
+
+Investigated cashubtc/wallet's iOS NFC (the "tap between two iPhones" claim):
+its `ContactlessPaymentCoordinator` uses `NFCNDEFReaderSession` (reader only,
+like ours) — reads a NUT-18 `creqA` request from a tag, makes a matching token,
+writes it back. NFC *receive* (being the tag) is Android-only (HCE); a repo-wide
+search for `CardSession` returned zero. So their app has **no iPhone-to-iPhone
+tap either** — the counterpart is always a card or an Android phone. Confirmed
+from their source, not asserted.
+
+Built from it (library `CocoCashuSwift` 0.2.0, app on top):
+- `PaymentRequest` — NUT-18 `creqA` encode/decode (shared CBOR codec extracted
+  to `CBOR.swift`), validated against the official NUT-18 test vectors.
+- `CashuManager.fulfillPaymentRequest` — payer side: pick a mint honoring the
+  request's named mints, create a satisfying token.
+- App, QR-based (works iPhone↔iPhone today, no NFC/card/server): **Receive →
+  "Request Payment (QR)"** (`RequestPaymentView`) shows a `creqA` QR; scanning or
+  pasting a `creqA` is recognized as a request to pay, fulfilled, and the
+  resulting token shown as a QR for the requester to scan back and claim.
+
+**NFC tap-to-pay (read creq from a card/Android, write token back) is not yet
+wired** — it needs a card or Android peer to be useful, and the QR path already
+serves the two-iPhone case. `fulfillPaymentRequest` makes it a small follow-up.
+
 **Capability (done):** the "Near Field Communication Tag Reading" capability is
 enabled — `CocoCashuApp.entitlements` declares
 `com.apple.developer.nfc.readersession.formats = [NDEF, TAG]` (PACE deliberately

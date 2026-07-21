@@ -35,6 +35,7 @@ struct WalletView: View {
     @State private var sendAmountString = ""
     @State private var showDiscardTokenConfirm = false
     @State private var showTokenScanner = false
+    @State private var showRequestCreator = false
 #if os(iOS)
     @State private var nfc = NFCService()
 #endif
@@ -443,17 +444,28 @@ struct WalletView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(tokenInput.isEmpty || isProcessingEcash)
+
+            Button {
+                showRequestCreator = true
+            } label: {
+                Label("Request Payment (QR)", systemImage: "arrow.down.circle")
+            }
+            .font(.footnote)
         }
         .padding()
         .frame(minWidth: 300, minHeight: 300)
+        .sheet(isPresented: $showRequestCreator) {
+            RequestPaymentView(wallet: wallet)
+        }
 #if os(iOS)
-        .presentationDetents([.height(360)])
+        .presentationDetents([.height(400)])
         .sheet(isPresented: $showTokenScanner) {
             QRScannerView(isPresenting: $showTokenScanner) { scanned in
-                // Some wallets encode the token as a `cashu:` URI; strip the scheme.
-                let token = scanned.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Strip a `cashu:`/`creq` URI scheme if present; claimToken routes
+                // a token vs. a creqA payment request automatically.
+                let value = scanned.trimmingCharacters(in: .whitespacesAndNewlines)
                     .replacingOccurrences(of: "cashu:", with: "", options: .caseInsensitive)
-                tokenInput = token
+                tokenInput = value
                 claimToken()
             }
         }
@@ -508,9 +520,17 @@ struct WalletView: View {
         let cleanToken = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanToken.isEmpty else { return }
 
+        // A NUT-18 payment request (`creqA…`) is the OPPOSITE of a token: someone
+        // is asking US to pay them. Fulfil it and present the resulting token for
+        // the requester to claim — reusing the Send result QR view.
+        if cleanToken.hasPrefix("creqA") {
+            payPaymentRequest(cleanToken)
+            return
+        }
+
         isProcessingEcash = true
         ecashError = nil
-        
+
         Task {
             do {
                 // 1. Init Coordinator
@@ -519,10 +539,10 @@ struct WalletView: View {
                 let manager = wallet.manager
                 let api = RealMintAPI(baseURL: activeMint)
                 let flow = MintCoordinator(manager: manager, api: api, blinding: manager.blinding)
-                
+
                 // 2. Call the new Receive Logic
                 try await flow.receive(token: cleanToken)
-                
+
                 // 3. Success UI Update
                 await MainActor.run {
                     self.isProcessingEcash = false
@@ -533,6 +553,36 @@ struct WalletView: View {
                     let generator = UINotificationFeedbackGenerator()
                     generator.notificationOccurred(.success)
 #endif
+                }
+            } catch {
+                await MainActor.run {
+                    self.ecashError = error.localizedDescription
+                    self.isProcessingEcash = false
+                }
+            }
+        }
+    }
+
+    /// Pay a scanned/pasted NUT-18 payment request: decode it, create a token
+    /// that satisfies it, and present that token (QR + copy) via the Send result
+    /// view so the requester can claim it. This is the QR-based tap-to-pay path —
+    /// the only one that works iPhone-to-iPhone.
+    private func payPaymentRequest(_ creq: String) {
+        guard !isProcessingEcash else { return }
+        isProcessingEcash = true
+        ecashError = nil
+
+        Task {
+            do {
+                let request = try PaymentRequest.decode(creq)
+                let token = try await wallet.manager.fulfillPaymentRequest(request)
+                await MainActor.run {
+                    self.isProcessingEcash = false
+                    self.tokenInput = ""
+                    // Hand the fulfilling token to the Send result view (QR + copy).
+                    self.tokenToShare = token
+                    self.showReceiveSheet = false
+                    self.showSendSheet = true
                 }
             } catch {
                 await MainActor.run {
