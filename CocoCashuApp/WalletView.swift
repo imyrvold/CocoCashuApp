@@ -321,8 +321,10 @@ struct WalletView: View {
                 Text("Token Created!").font(.headline)
 
                 // QR is the iPhone-to-iPhone hand-off: the recipient scans it
-                // with their wallet camera. (V4/cashuB keeps it compact.)
-                TokenQRView(content: token, size: 200)
+                // with their wallet camera. Static when compact (V4/cashuB
+                // usually is); automatically animated (BC-UR) when too dense
+                // for a single code.
+                TokenQRDisplay(content: token, size: 200)
                     .privacySensitive()
 
                 Text(token)

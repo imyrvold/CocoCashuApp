@@ -532,6 +532,14 @@ Scan QR") instead of "Invalid token". Single-part `ur:bytes` paste unwraps to
 the inner token. Tests: 40 passing. **Live-verified 2026-07-21:** scanned a
 real Cashu-app animated QR on device and claimed the 5-sat token.
 
+**Animated sending too** (library 0.4.0, `UREncoder` made public):
+`TokenQRDisplay` shows a single static QR when the content is ≤650 chars
+(universally scannable — remains the default; typical V4 tokens qualify) and
+automatically switches to a ~5 fps BC-UR animated stream above that (replacing
+the old "token too large for a QR" dead end). Used for send-result tokens and
+NUT-18 request QRs. Static-first is deliberate: every wallet reads static;
+only BC-UR-capable wallets read animated.
+
 **Capability (done):** the "Near Field Communication Tag Reading" capability is
 enabled — `CocoCashuApp.entitlements` declares
 `com.apple.developer.nfc.readersession.formats = [NDEF, TAG]` (PACE deliberately

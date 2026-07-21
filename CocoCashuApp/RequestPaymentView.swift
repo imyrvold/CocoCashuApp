@@ -28,7 +28,7 @@ struct RequestPaymentView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                TokenQRView(content: creq, size: 220)
+                TokenQRDisplay(content: creq, size: 220)
 
                 Button("Copy Request") {
                     #if os(iOS)
