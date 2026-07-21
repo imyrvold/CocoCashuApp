@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/imyrvold/CocoCashuSwift.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "e90939647f81803504c3dad257548ef04480112d"
+        "revision" : "e90939647f81803504c3dad257548ef04480112d",
+        "version" : "0.1.0"
       }
     },
     {
