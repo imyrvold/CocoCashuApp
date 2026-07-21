@@ -529,7 +529,8 @@ continuous mode (single-shot behavior unchanged for invoices); the receive
 scanner accumulates UR frames with a progress overlay ("keep the camera on
 it"); pasting a lone animation frame now explains itself ("frame N of M — use
 Scan QR") instead of "Invalid token". Single-part `ur:bytes` paste unwraps to
-the inner token. Tests: 40 passing.
+the inner token. Tests: 40 passing. **Live-verified 2026-07-21:** scanned a
+real Cashu-app animated QR on device and claimed the 5-sat token.
 
 **Capability (done):** the "Near Field Communication Tag Reading" capability is
 enabled — `CocoCashuApp.entitlements` declares
