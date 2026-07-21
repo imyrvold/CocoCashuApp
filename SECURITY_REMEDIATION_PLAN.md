@@ -514,6 +514,23 @@ Built from it (library `CocoCashuSwift` 0.2.0, app on top):
 wired** — it needs a card or Android peer to be useful, and the QR path already
 serves the two-iPhone case. `fulfillPaymentRequest` makes it a small follow-up.
 
+### BC-UR animated-QR receiving (library 0.3.0)
+
+Receiving from the Cashu app failed: it displays tokens as ANIMATED multi-part
+QR streams (BC-UR / MUR fountain coding, `ur:bytes/N-M/…`) — one frame is not a
+token, so paste and single-shot scan both dead-ended. Added to the library
+(`BCUR.swift`, ported from the URKit reference, BSD-2-C-P): CRC-32, minimal
+bytewords, Xoshiro256**, Walker-Vose sampler, fragment chooser, XOR fountain
+`URDecoder` (+ `UREncoder` for tests/future animated sending). Pinned to
+reference vectors — crc32("Wolf"), the Xoshiro "Wolf" stream, the MUR part-CBOR
+and bytewords vectors — plus a REAL captured Cashu-app frame and a
+mid-stream-join round trip (mixed parts only). App: `QRScannerView` gained a
+continuous mode (single-shot behavior unchanged for invoices); the receive
+scanner accumulates UR frames with a progress overlay ("keep the camera on
+it"); pasting a lone animation frame now explains itself ("frame N of M — use
+Scan QR") instead of "Invalid token". Single-part `ur:bytes` paste unwraps to
+the inner token. Tests: 40 passing.
+
 **Capability (done):** the "Near Field Communication Tag Reading" capability is
 enabled — `CocoCashuApp.entitlements` declares
 `com.apple.developer.nfc.readersession.formats = [NDEF, TAG]` (PACE deliberately

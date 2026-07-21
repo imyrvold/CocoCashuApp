@@ -5,7 +5,12 @@ import AVFoundation
 struct QRScannerView: UIViewControllerRepresentable {
     @Binding var isPresenting: Bool
     var foundCode: (String) -> Void
-    
+    /// Continuous mode, for ANIMATED (multi-part BC-UR) QR codes: called for
+    /// every distinct frame; return true to finish (vibrate + dismiss), false to
+    /// keep scanning. When nil (default), the scanner is single-shot: the first
+    /// code is delivered to `foundCode` and the scanner closes.
+    var processFrame: ((String) -> Bool)? = nil
+
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
@@ -30,11 +35,27 @@ struct QRScannerView: UIViewControllerRepresentable {
             self.parent = parent
         }
 
+        // Last frame delivered in continuous mode, to skip identical repeats
+        // (the camera reports the same on-screen frame many times per second).
+        private var lastFrame: String?
+
         func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
             guard !didFind else { return }
             if let metadataObject = metadataObjects.first {
                 guard let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject else { return }
                 guard let stringValue = readableObject.stringValue else { return }
+
+                if let processFrame = parent.processFrame {
+                    // Continuous (animated QR) mode.
+                    guard stringValue != lastFrame else { return }
+                    lastFrame = stringValue
+                    if processFrame(stringValue) {
+                        didFind = true
+                        AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
+                        parent.isPresenting = false
+                    }
+                    return
+                }
 
                 didFind = true
 

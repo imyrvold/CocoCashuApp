@@ -39,6 +39,10 @@ struct WalletView: View {
     // nil = automatic (largest-balance mint covering the amount); otherwise the
     // chosen mint's URL string, to send from a specific mint.
     @State private var selectedMintURL: String?
+    // BC-UR animated-QR reassembly for the receive scanner (Cashu app shows
+    // large tokens as multi-frame fountain-coded QR streams).
+    @State private var urDecoder = URDecoder()
+    @State private var urProgress: Double?
 #if os(iOS)
     @State private var nfc = NFCService()
 #endif
@@ -477,17 +481,65 @@ struct WalletView: View {
 #if os(iOS)
         .presentationDetents([.height(400)])
         .sheet(isPresented: $showTokenScanner) {
-            QRScannerView(isPresenting: $showTokenScanner) { scanned in
-                // Strip a `cashu:`/`creq` URI scheme if present; claimToken routes
-                // a token vs. a creqA payment request automatically.
-                let value = scanned.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: "cashu:", with: "", options: .caseInsensitive)
-                tokenInput = value
-                claimToken()
+            ZStack(alignment: .bottom) {
+                QRScannerView(isPresenting: $showTokenScanner, foundCode: { _ in }) { scanned in
+                    handleScannedFrame(scanned)
+                }
+                if let progress = urProgress {
+                    // Animated (multi-part) QR in progress: keep the camera on it.
+                    VStack(spacing: 6) {
+                        ProgressView(value: progress)
+                            .frame(maxWidth: 220)
+                        Text("Animated QR — \(Int(progress * 100))% received. Keep the camera on it.")
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                    }
+                    .padding()
+                    .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.bottom, 40)
+                }
+            }
+            .onAppear {
+                urDecoder = URDecoder()
+                urProgress = nil
             }
         }
 #endif
     }
+
+#if os(iOS)
+    /// One camera frame from the receive scanner. Returns true when scanning
+    /// should stop (complete token/request captured).
+    private func handleScannedFrame(_ scanned: String) -> Bool {
+        let value = scanned.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "cashu:", with: "", options: .caseInsensitive)
+
+        if URDecoder.isUR(value) {
+            // Multi-part animated QR: accumulate frames until the fountain
+            // decoder completes. Bad/foreign frames are skipped, not fatal.
+            do {
+                try urDecoder.receivePart(value)
+            } catch {
+                return false
+            }
+            urProgress = urDecoder.progress
+            guard let payload = urDecoder.result else { return false }
+            guard let token = String(data: payload, encoding: .utf8), !token.isEmpty else {
+                ecashError = "Animated QR decoded, but its contents aren't a Cashu token."
+                return true
+            }
+            tokenInput = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "cashu:", with: "", options: .caseInsensitive)
+            claimToken()
+            return true
+        }
+
+        // Static QR: token or creqA payment request, handled by claimToken.
+        tokenInput = value
+        claimToken()
+        return true
+    }
+#endif
     
     private func createToken() {
         guard let amt = Int64(sendAmountString), amt > 0 else { return }
@@ -545,8 +597,26 @@ struct WalletView: View {
         // first and fails with "already spent" once the first swap lands.
         guard !isProcessingEcash else { return }
 
-        let cleanToken = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        var cleanToken = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanToken.isEmpty else { return }
+
+        // Pasted UR strings: a single-part `ur:bytes/…` unwraps to the token
+        // inside; one frame of an ANIMATED stream (`ur:bytes/N-M/…`) can never be
+        // decoded alone — surface the "use Scan QR" guidance instead of a vague
+        // invalid-token error.
+        if URDecoder.isUR(cleanToken) {
+            do {
+                let payload = try URDecoder.decodeSinglePart(cleanToken)
+                guard let inner = String(data: payload, encoding: .utf8), !inner.isEmpty else {
+                    ecashError = "This UR doesn't contain a Cashu token."
+                    return
+                }
+                cleanToken = inner.trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                ecashError = (error as? BCURError)?.errorDescription ?? error.localizedDescription
+                return
+            }
+        }
 
         // A NUT-18 payment request (`creqA…`) is the OPPOSITE of a token: someone
         // is asking US to pay them. Fulfil it and present the resulting token for
