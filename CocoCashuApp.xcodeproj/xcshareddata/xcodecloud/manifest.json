@@ -1,0 +1,9 @@
+{
+  "id" : "cd27fd1b-7440-4e82-9470-723d8e00ea0d",
+  "targets" : [
+    {
+      "id" : "72a41dfe-54b4-408a-80c5-7119f1809835",
+      "name" : "CocoCashuApp"
+    }
+  ]
+}
